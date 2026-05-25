@@ -216,31 +216,46 @@ class TestUnresolvedCalls:
         assert "baz.qux" in out
 
 
-# ── Agent explanation ─────────────────────────────────────────────────────────
+# ── AI Analysis section ───────────────────────────────────────────────────────
 
 class TestAgentSection:
-    def _agent(self) -> AgentResult:
+    def _agent(self, code_snippet: str | None = "seen = set()") -> AgentResult:
         return AgentResult(
             verdict="This function is O(n²) in practice",
-            explanation="This function is O(n²) in practice. The `not in` check on a list is O(n) per iteration.",
+            why="The `not in` check on a list is O(n) per iteration.",
+            fix="Replace the list with a set for O(1) membership checks.",
+            code_snippet=code_snippet,
             tokens_used=420,
+            explanation="VERDICT: This function is O(n²) in practice\nWHY: ...",
         )
 
     def test_agent_section_appears_when_provided(self):
         out = format_report(_report(), FUNCTION_NAME, agent_result=self._agent())
-        assert "Agent explanation" in out
+        assert "AI Analysis" in out
 
     def test_agent_section_absent_when_none(self):
         out = format_report(_report(), FUNCTION_NAME, agent_result=None)
-        assert "Agent explanation" not in out
+        assert "AI Analysis" not in out
 
-    def test_verdict_appears_in_agent_section(self):
+    def test_verdict_appears(self):
         out = format_report(_report(), FUNCTION_NAME, agent_result=self._agent())
         assert "This function is O(n²) in practice" in out
 
-    def test_explanation_appears_in_agent_section(self):
+    def test_why_appears(self):
         out = format_report(_report(), FUNCTION_NAME, agent_result=self._agent())
         assert "not in" in out
+
+    def test_fix_appears(self):
+        out = format_report(_report(), FUNCTION_NAME, agent_result=self._agent())
+        assert "set for O(1)" in out
+
+    def test_code_snippet_appears_when_present(self):
+        out = format_report(_report(), FUNCTION_NAME, agent_result=self._agent())
+        assert "seen = set()" in out
+
+    def test_code_snippet_absent_when_none(self):
+        out = format_report(_report(), FUNCTION_NAME, agent_result=self._agent(code_snippet=None))
+        assert "Suggested code" not in out
 
     def test_token_count_appears(self):
         out = format_report(_report(), FUNCTION_NAME, agent_result=self._agent())
@@ -255,4 +270,4 @@ class TestCleanRun:
         assert "Warnings:" not in out
         assert "Unresolved calls" not in out
         assert "Mismatch reason" not in out
-        assert "Agent explanation" not in out
+        assert "AI Analysis" not in out

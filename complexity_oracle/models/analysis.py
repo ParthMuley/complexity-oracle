@@ -70,6 +70,9 @@ class Report:
 class AgentResult:
     """Output of the Sprint 2 agent reasoning stage."""
 
-    verdict: str        # plain-English complexity verdict
-    explanation: str    # why static and empirical agree or disagree
-    tokens_used: int    # total tokens consumed across all agent messages
+    verdict: str               # one-sentence complexity verdict
+    why: str                   # explanation of complexity and any mismatch cause
+    fix: str                   # concrete developer action to improve performance
+    code_snippet: str | None   # optional improved code example
+    tokens_used: int           # total tokens consumed across all agent messages
+    explanation: str           # raw full response text (kept for debugging)

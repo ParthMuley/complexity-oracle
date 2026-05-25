@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from complexity_oracle.core.agent import run_agent, _extract_text, _extract_verdict
+from complexity_oracle.core.agent import run_agent, _extract_text, _parse_structured_response
 from complexity_oracle.models.analysis import AgentResult
 
 # ── Mock factories ────────────────────────────────────────────────────────────
@@ -32,9 +32,23 @@ def _response(stop_reason: str, content: list, usage: SimpleNamespace | None = N
     return r
 
 
+# Structured response text the mock agent returns
+_MOCK_STRUCTURED_RESPONSE = (
+    "VERDICT: This function is O(n²) in practice despite having one visible loop.\n"
+    "WHY: The `item not in seen` check on line 5 is an O(n) list scan executed on "
+    "every iteration of the outer loop, making true complexity O(n²).\n"
+    "FIX: Replace `seen = []` with `seen = set()` for O(1) membership tests.\n"
+    "CODE:\n"
+    "seen = set()\n"
+    "for item in data:\n"
+    "    if item not in seen:\n"
+    "        seen.add(item)"
+)
+
+
 # A two-turn mock conversation:
 #  Turn 1 → tool_use (three tool calls)
-#  Turn 2 → end_turn (text explanation)
+#  Turn 2 → end_turn (structured text response)
 def _two_turn_responses() -> list:
     turn1 = _response(
         stop_reason="tool_use",
@@ -52,11 +66,7 @@ def _two_turn_responses() -> list:
     )
     turn2 = _response(
         stop_reason="end_turn",
-        content=[_text_block(
-            "This function is O(n²) in practice despite having one visible loop. "
-            "The `item not in seen` check is an O(n) list scan on every iteration. "
-            "Fix: replace the list with a set for O(1) membership checks."
-        )],
+        content=[_text_block(_MOCK_STRUCTURED_RESPONSE)],
         usage=_usage(300, 120),
     )
     return [turn1, turn2]
@@ -64,28 +74,47 @@ def _two_turn_responses() -> list:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-class TestHelpers:
-    def test_extract_text_returns_text_block(self):
+class TestExtractText:
+    def test_returns_text_block(self):
         blocks = [_text_block("Hello world")]
         assert _extract_text(blocks) == "Hello world"
 
-    def test_extract_text_empty_list(self):
+    def test_empty_list(self):
         assert _extract_text([]) == ""
 
-    def test_extract_text_skips_non_text_blocks(self):
+    def test_skips_non_text_blocks(self):
         blocks = [_tool_use_block("analyze_ast", {}), _text_block("Found it")]
         assert _extract_text(blocks) == "Found it"
 
-    def test_extract_verdict_first_sentence(self):
-        explanation = "This function is O(n²). It has nested loops."
-        assert _extract_verdict(explanation) == "This function is O(n²)"
 
-    def test_extract_verdict_empty_string(self):
-        assert _extract_verdict("") == "No verdict produced"
+class TestParseStructuredResponse:
+    def test_verdict_extracted(self):
+        result = _parse_structured_response(_MOCK_STRUCTURED_RESPONSE)
+        assert result["verdict"] == "This function is O(n²) in practice despite having one visible loop."
 
-    def test_extract_verdict_single_sentence_no_period(self):
-        result = _extract_verdict("This is O(n)")
-        assert result == "This is O(n)"
+    def test_why_extracted(self):
+        result = _parse_structured_response(_MOCK_STRUCTURED_RESPONSE)
+        assert "O(n) list scan" in result["why"]
+
+    def test_fix_extracted(self):
+        result = _parse_structured_response(_MOCK_STRUCTURED_RESPONSE)
+        assert "set()" in result["fix"]
+
+    def test_code_snippet_extracted(self):
+        result = _parse_structured_response(_MOCK_STRUCTURED_RESPONSE)
+        assert result["code_snippet"] is not None
+        assert "seen = set()" in result["code_snippet"]
+
+    def test_code_snippet_none_when_absent(self):
+        text = "VERDICT: O(n).\nWHY: One loop.\nFIX: No change needed."
+        result = _parse_structured_response(text)
+        assert result["code_snippet"] is None
+
+    def test_fallback_when_unstructured(self):
+        text = "This function is O(n). Nothing to worry about."
+        result = _parse_structured_response(text)
+        assert result["verdict"] == "This function is O(n)"
+        assert result["why"] == text  # full text surfaced in why
 
 
 # ── Missing API key ───────────────────────────────────────────────────────────
@@ -129,11 +158,29 @@ class TestReActLoop:
         assert isinstance(result.verdict, str)
         assert len(result.verdict) > 0
 
-    def test_explanation_is_non_empty_string(self):
+    def test_why_is_non_empty_string(self):
+        with self._mock_client(_two_turn_responses()):
+            result = run_agent("f.py", "fn")
+        assert isinstance(result.why, str)
+        assert len(result.why) > 0
+
+    def test_fix_is_non_empty_string(self):
+        with self._mock_client(_two_turn_responses()):
+            result = run_agent("f.py", "fn")
+        assert isinstance(result.fix, str)
+        assert len(result.fix) > 0
+
+    def test_code_snippet_populated_from_mock(self):
+        with self._mock_client(_two_turn_responses()):
+            result = run_agent("f.py", "fn")
+        assert result.code_snippet is not None
+        assert "seen = set()" in result.code_snippet
+
+    def test_explanation_holds_raw_text(self):
         with self._mock_client(_two_turn_responses()):
             result = run_agent("f.py", "fn")
         assert isinstance(result.explanation, str)
-        assert len(result.explanation) > 0
+        assert "VERDICT:" in result.explanation
 
     def test_tokens_used_is_positive_int(self):
         with self._mock_client(_two_turn_responses()):
@@ -147,10 +194,10 @@ class TestReActLoop:
             result = run_agent("f.py", "fn")
         assert result.tokens_used == 670
 
-    def test_verdict_is_first_sentence_of_explanation(self):
+    def test_verdict_parsed_from_structured_response(self):
         with self._mock_client(_two_turn_responses()):
             result = run_agent("f.py", "fn")
-        assert result.explanation.startswith(result.verdict)
+        assert "O(n²)" in result.verdict
 
     def test_tool_dispatch_called_for_each_tool(self):
         with self._mock_client(_two_turn_responses()):
@@ -170,13 +217,15 @@ class TestReActLoop:
 
     def test_loop_terminates_on_end_turn(self):
         # Immediately returns end_turn — no tools called
-        single_turn = [_response(
-            stop_reason="end_turn",
-            content=[_text_block("This function is O(1). No loops present.")],
-        )]
+        structured = (
+            "VERDICT: This function is O(1). No loops present.\n"
+            "WHY: The function performs a fixed number of operations regardless of input size.\n"
+            "FIX: No change needed."
+        )
+        single_turn = [_response(stop_reason="end_turn", content=[_text_block(structured)])]
         with self._mock_client(single_turn):
             result = run_agent("f.py", "fn")
-        assert result.verdict == "This function is O(1)"
+        assert "O(1)" in result.verdict
 
     def test_api_called_with_correct_model(self):
         mock_client = MagicMock()

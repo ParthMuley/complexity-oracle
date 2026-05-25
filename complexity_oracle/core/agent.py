@@ -2,7 +2,7 @@
 
 The agent receives a file path and function name, calls the three MCP tools
 (analyze_ast → run_profiler → fit_curve) in a ReAct loop, then produces a
-plain-English verdict explaining the true complexity and any mismatch.
+structured verdict explaining the true complexity and any mismatch.
 
 Sprint 2 scope: one agent, three tools, one LLM call cycle (~200 in / ~300 out tokens).
 Sprint 3 will add the MCP server wrapper around these tools.
@@ -10,6 +10,7 @@ Sprint 3 will add the MCP server wrapper around these tools.
 from __future__ import annotations
 
 import os
+import re
 
 import anthropic
 
@@ -30,15 +31,20 @@ Use your tools in this order:
 2. run_profiler  — measure actual runtime at four input sizes (n = 10, 100, 1000, 10000)
 3. fit_curve     — pass the profiler output to determine the empirical complexity class
 
-After all three tool calls, deliver a concise plain-English verdict that covers:
-- The true (empirical) complexity class
-- Whether static analysis agrees with the empirical result
-- If there is a mismatch: exactly WHY they disagree (what hidden cost causes it)
-- A concrete suggestion for what the developer should change to fix it
+After all three tool calls, respond using EXACTLY this format. Use plain text only —
+no markdown, no **, no ###, no bullet points.
 
-Be specific. Name the line or operation causing the hidden cost. Keep the explanation
-under 150 words. Start your first sentence with the verdict (e.g. "This function is O(n²)
-in practice...").
+VERDICT: <one sentence — state the true complexity class and whether it matches static analysis>
+WHY: <2-3 sentences — explain what causes this complexity; if there is a mismatch, name the exact line or operation responsible>
+FIX: <one sentence — concrete action the developer should take>
+CODE:
+<optional: 3-10 lines of improved Python code showing the fix; omit this entire section if no code change is needed>
+
+Rules:
+- VERDICT must start with the complexity class, e.g. "This function is O(n²) in practice".
+- WHY must name the specific line number or operation causing the cost.
+- If static and empirical complexity agree and the code is fine, FIX should say "No change needed.".
+- Only include CODE if you are showing a concrete code improvement.
 """
 
 
@@ -81,14 +87,17 @@ def run_agent(file_path: str, function_name: str) -> AgentResult:
 
         total_tokens += response.usage.input_tokens + response.usage.output_tokens
 
-        # ── Agent finished — extract explanation ─────────────────────────────
+        # ── Agent finished — parse structured response ────────────────────────
         if response.stop_reason == "end_turn":
-            explanation = _extract_text(response.content)
-            verdict = _extract_verdict(explanation)
+            raw = _extract_text(response.content)
+            sections = _parse_structured_response(raw)
             return AgentResult(
-                verdict=verdict,
-                explanation=explanation,
+                verdict=sections["verdict"],
+                why=sections["why"],
+                fix=sections["fix"],
+                code_snippet=sections["code_snippet"],
                 tokens_used=total_tokens,
+                explanation=raw,
             )
 
         # ── Agent wants to call tools ────────────────────────────────────────
@@ -118,8 +127,11 @@ def run_agent(file_path: str, function_name: str) -> AgentResult:
     # Fallback if loop exhausted without end_turn
     return AgentResult(
         verdict="Analysis incomplete",
-        explanation="Agent did not produce a final explanation within the turn limit.",
+        why="Agent did not produce a final explanation within the turn limit.",
+        fix="Re-run the analysis or increase the turn limit.",
+        code_snippet=None,
         tokens_used=total_tokens,
+        explanation="",
     )
 
 
@@ -133,9 +145,38 @@ def _extract_text(content: list) -> str:
     return ""
 
 
-def _extract_verdict(explanation: str) -> str:
-    """Return the first sentence of the explanation as the verdict."""
-    if not explanation:
-        return "No verdict produced"
-    first = explanation.split(".")[0].strip()
-    return first if first else explanation[:120]
+def _parse_structured_response(text: str) -> dict:
+    """Parse VERDICT/WHY/FIX/CODE sections from a structured agent response.
+
+    Returns a dict with keys: verdict, why, fix, code_snippet.
+    Falls back gracefully if the model didn't follow the format exactly.
+    """
+    _LABELS = ["VERDICT", "WHY", "FIX", "CODE"]
+    pattern = re.compile(
+        r"^(" + "|".join(_LABELS) + r"):\s*", re.MULTILINE
+    )
+    parts = pattern.split(text)
+    # parts = [pre_text, LABEL1, content1, LABEL2, content2, ...]
+
+    parsed: dict[str, str | None] = {k: None for k in _LABELS}
+    i = 1
+    while i + 1 < len(parts):
+        label = parts[i]
+        content = parts[i + 1].strip()
+        if label in parsed:
+            parsed[label] = content or None
+        i += 2
+
+    # Graceful fallback — if structured parsing failed, use raw text
+    if not parsed["VERDICT"]:
+        first_sentence = text.split(".")[0].strip()
+        parsed["VERDICT"] = first_sentence if first_sentence else "No verdict produced"
+    if not parsed["WHY"]:
+        parsed["WHY"] = text  # surface the full text so nothing is lost
+
+    return {
+        "verdict": parsed["VERDICT"] or "No verdict produced",
+        "why": parsed["WHY"] or "",
+        "fix": parsed["FIX"] or "No fix suggested.",
+        "code_snippet": parsed["CODE"],
+    }

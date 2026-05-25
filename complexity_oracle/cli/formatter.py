@@ -67,18 +67,38 @@ def format_report(
         for call in report.parse.unresolved_calls:
             lines.append(f"    Line {call.line:>3}:  {call.name}  — {call.reason}")
 
-    # ── Agent explanation ─────────────────────────────────────────────────────
+    # ── AI Analysis ───────────────────────────────────────────────────────────
     if agent_result is not None:
         lines.append("")
-        lines.append("  Agent explanation:")
-        lines.append(f"    Verdict: {agent_result.verdict}")
+        lines.append("  AI Analysis:")
         lines.append("")
-        # Word-wrap the explanation body to 72 chars, indented 4 spaces
-        wrapped = textwrap.fill(agent_result.explanation, width=72)
-        for line in wrapped.splitlines():
-            lines.append(f"    {line}")
-        lines.append(f"")
-        lines.append(f"    [{agent_result.tokens_used} tokens used]")
+
+        # Verdict
+        lines.append(f"  Verdict:  {agent_result.verdict}")
+
+        # Why
+        if agent_result.why:
+            lines.append("")
+            lines.append("  Why:")
+            for ln in textwrap.wrap(agent_result.why, width=68):
+                lines.append(f"    {ln}")
+
+        # Fix
+        if agent_result.fix:
+            lines.append("")
+            lines.append("  Fix:")
+            for ln in textwrap.wrap(agent_result.fix, width=68):
+                lines.append(f"    {ln}")
+
+        # Suggested code snippet
+        if agent_result.code_snippet:
+            lines.append("")
+            lines.append("  Suggested code:")
+            for ln in agent_result.code_snippet.splitlines():
+                lines.append(f"    {ln}")
+
+        lines.append("")
+        lines.append(f"  [{agent_result.tokens_used} tokens used]")
 
     # ── Footer ────────────────────────────────────────────────────────────────
     lines += ["", _RULE, ""]
