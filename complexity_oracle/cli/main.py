@@ -4,10 +4,15 @@ import argparse
 import io
 import sys
 
+# Load .env file if present (before any env var reads)
+from dotenv import load_dotenv
+load_dotenv()
+
 # Ensure stdout can handle Unicode (e.g. ═, ⚠, ✓) on Windows terminals.
 if hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
+from complexity_oracle.core.agent import run_agent
 from complexity_oracle.core.fitter import fit_curve
 from complexity_oracle.core.parser import parse_file
 from complexity_oracle.core.profiler import profile_file
@@ -35,6 +40,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=5.0,
         help="Per-input-size profiling timeout in seconds (default: 5.0).",
     )
+    analyze.add_argument(
+        "--no-agent",
+        action="store_true",
+        default=False,
+        help="Skip the AI agent step. Prints static + empirical results only (no LLM call).",
+    )
     return parser
 
 
@@ -43,10 +54,15 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "analyze":
-        _run_analyze(args.file, args.function, args.timeout)
+        _run_analyze(args.file, args.function, args.timeout, args.no_agent)
 
 
-def _run_analyze(file_path: str, function_name: str | None, timeout_s: float) -> None:
+def _run_analyze(
+    file_path: str,
+    function_name: str | None,
+    timeout_s: float,
+    no_agent: bool = False,
+) -> None:
     # ── Parse ────────────────────────────────────────────────────────────────
     try:
         parse = parse_file(file_path)
@@ -82,11 +98,26 @@ def _run_analyze(file_path: str, function_name: str | None, timeout_s: float) ->
     # ── Report ───────────────────────────────────────────────────────────────
     report = build_report(file_path, parse, profile, fit)
 
-    # ── [Sprint 2 agent slot] ─────────────────────────────────────────────────
-    # agent_summary = run_agent(report)  # ReAct loop over the three MCP tools
+    # ── Agent (Sprint 2) ─────────────────────────────────────────────────────
+    agent_result = None
+    if not no_agent:
+        import os
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            print(
+                "Error: ANTHROPIC_API_KEY is not set.\n"
+                "Set it with:  $env:ANTHROPIC_API_KEY = 'sk-ant-...'\n"
+                "Or skip the agent with:  --no-agent",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        try:
+            agent_result = run_agent(file_path, function_name)
+        except Exception as e:
+            # Agent failure is non-fatal — show warning, display report without explanation
+            print(f"Warning: agent failed ({e}). Showing static + empirical results only.", file=sys.stderr)
 
     # ── Display ──────────────────────────────────────────────────────────────
-    print_report(report, function_name)
+    print_report(report, function_name, agent_result)
 
 
 if __name__ == "__main__":

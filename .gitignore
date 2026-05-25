@@ -12,3 +12,6 @@ build/
 CLAUDE.md
 SESSION_LOG.md
 LAYMAN_GUIDE.md
+
+# Environment variables — never commit this
+.env

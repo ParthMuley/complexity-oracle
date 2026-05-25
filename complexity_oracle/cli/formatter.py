@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import os
+import textwrap
 
-from complexity_oracle.models.analysis import Report
+from complexity_oracle.models.analysis import AgentResult, Report
 
 _RULE = "═" * 44
 
 
-def format_report(report: Report, function_name: str) -> str:
-    """Render a Report to a human-readable string.
+def format_report(
+    report: Report,
+    function_name: str,
+    agent_result: AgentResult | None = None,
+) -> str:
+    """Render a Report (and optional AgentResult) to a human-readable string.
 
     All display logic for the oracle lives here — no print() calls anywhere
     else in the project.
@@ -62,12 +67,29 @@ def format_report(report: Report, function_name: str) -> str:
         for call in report.parse.unresolved_calls:
             lines.append(f"    Line {call.line:>3}:  {call.name}  — {call.reason}")
 
+    # ── Agent explanation ─────────────────────────────────────────────────────
+    if agent_result is not None:
+        lines.append("")
+        lines.append("  Agent explanation:")
+        lines.append(f"    Verdict: {agent_result.verdict}")
+        lines.append("")
+        # Word-wrap the explanation body to 72 chars, indented 4 spaces
+        wrapped = textwrap.fill(agent_result.explanation, width=72)
+        for line in wrapped.splitlines():
+            lines.append(f"    {line}")
+        lines.append(f"")
+        lines.append(f"    [{agent_result.tokens_used} tokens used]")
+
     # ── Footer ────────────────────────────────────────────────────────────────
     lines += ["", _RULE, ""]
 
     return "\n".join(lines)
 
 
-def print_report(report: Report, function_name: str) -> None:
-    """Print a formatted Report to stdout."""
-    print(format_report(report, function_name))
+def print_report(
+    report: Report,
+    function_name: str,
+    agent_result: AgentResult | None = None,
+) -> None:
+    """Print a formatted Report (and optional AgentResult) to stdout."""
+    print(format_report(report, function_name, agent_result))

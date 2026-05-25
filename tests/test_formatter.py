@@ -5,6 +5,7 @@ import pytest
 
 from complexity_oracle.cli.formatter import format_report
 from complexity_oracle.models.analysis import (
+    AgentResult,
     Complexity,
     FitResult,
     ParseResult,
@@ -215,6 +216,37 @@ class TestUnresolvedCalls:
         assert "baz.qux" in out
 
 
+# ── Agent explanation ─────────────────────────────────────────────────────────
+
+class TestAgentSection:
+    def _agent(self) -> AgentResult:
+        return AgentResult(
+            verdict="This function is O(n²) in practice",
+            explanation="This function is O(n²) in practice. The `not in` check on a list is O(n) per iteration.",
+            tokens_used=420,
+        )
+
+    def test_agent_section_appears_when_provided(self):
+        out = format_report(_report(), FUNCTION_NAME, agent_result=self._agent())
+        assert "Agent explanation" in out
+
+    def test_agent_section_absent_when_none(self):
+        out = format_report(_report(), FUNCTION_NAME, agent_result=None)
+        assert "Agent explanation" not in out
+
+    def test_verdict_appears_in_agent_section(self):
+        out = format_report(_report(), FUNCTION_NAME, agent_result=self._agent())
+        assert "This function is O(n²) in practice" in out
+
+    def test_explanation_appears_in_agent_section(self):
+        out = format_report(_report(), FUNCTION_NAME, agent_result=self._agent())
+        assert "not in" in out
+
+    def test_token_count_appears(self):
+        out = format_report(_report(), FUNCTION_NAME, agent_result=self._agent())
+        assert "420" in out
+
+
 # ── Clean run ─────────────────────────────────────────────────────────────────
 
 class TestCleanRun:
@@ -223,3 +255,4 @@ class TestCleanRun:
         assert "Warnings:" not in out
         assert "Unresolved calls" not in out
         assert "Mismatch reason" not in out
+        assert "Agent explanation" not in out
