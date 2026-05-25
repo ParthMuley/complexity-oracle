@@ -76,3 +76,27 @@ class AgentResult:
     code_snippet: str | None   # optional improved code example
     tokens_used: int           # total tokens consumed across all agent messages
     explanation: str           # raw full response text (kept for debugging)
+
+
+@dataclass
+class FunctionResult:
+    """Analysis result for one function within a folder scan."""
+
+    file_path: str
+    function_name: str
+    static_complexity: Complexity
+    empirical_complexity: Complexity
+    r_squared: float
+    mismatch: bool
+    warnings: list[str]
+    error: str | None          # set if parsing or profiling failed for this function
+
+
+@dataclass
+class FolderReport:
+    """Aggregated results for a folder-mode scan."""
+
+    folder_path: str
+    results: list[FunctionResult]
+    total_files: int
+    skipped_files: list[str]   # files that could not be parsed (syntax errors etc.)

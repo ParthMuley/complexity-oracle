@@ -17,7 +17,8 @@ from complexity_oracle.core.fitter import fit_curve
 from complexity_oracle.core.parser import parse_file
 from complexity_oracle.core.profiler import profile_file
 from complexity_oracle.core.report import build_report
-from complexity_oracle.cli.formatter import print_report
+from complexity_oracle.core.scanner import scan_folder
+from complexity_oracle.cli.formatter import print_folder_report, print_report
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -28,7 +29,13 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     analyze = sub.add_parser("analyze", help="Analyze a Python file for complexity.")
-    analyze.add_argument("file", help="Path to the Python file to analyze.")
+    analyze.add_argument("file", help="Path to a Python file or directory to analyze.")
+    analyze.add_argument(
+        "--recursive", "-r",
+        action="store_true",
+        default=False,
+        help="When analysing a folder, scan subdirectories recursively.",
+    )
     analyze.add_argument(
         "--function",
         default=None,
@@ -54,7 +61,25 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "analyze":
-        _run_analyze(args.file, args.function, args.timeout, args.no_agent)
+        import os
+        if os.path.isdir(args.file):
+            _run_folder(args.file, args.recursive, args.timeout)
+        else:
+            _run_analyze(args.file, args.function, args.timeout, args.no_agent)
+
+
+def _run_folder(
+    folder_path: str,
+    recursive: bool,
+    timeout_s: float,
+) -> None:
+    import os
+    if not os.path.isdir(folder_path):
+        print(f"Error: not a directory — {folder_path}", file=sys.stderr)
+        sys.exit(1)
+
+    folder_report = scan_folder(folder_path, recursive=recursive, timeout_s=timeout_s)
+    print_folder_report(folder_report)
 
 
 def _run_analyze(
