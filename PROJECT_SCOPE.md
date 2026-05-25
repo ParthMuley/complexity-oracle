@@ -161,27 +161,53 @@ Three separate tracks that can be worked in any order.
 **Problem:** The FastAPI service (`api/app.py`) runs locally but is not accessible
 to anyone else. There is no live URL to share or put on a resume.
 
+**Deployment strategy — do both, in this order:**
+
+Step 1: Write the `Dockerfile` (works everywhere — do this once)
+Step 2: Deploy to Railway first (live URL in ~10 minutes, zero friction)
+Step 3: Deploy the same image to GCP Cloud Run (30 minutes, better resume story)
+
+Why both:
+- Railway = fastest path to a shareable live URL
+- GCP Cloud Run = Atlassian runs on GCP; mentioning Cloud Run in an interview
+  lands better than Railway for this specific role target
+
+**Sandbox caveat:**
+The profiler runs user-submitted Python code in a subprocess. On a public
+cloud endpoint this is a security risk. Two options:
+- **Option A (recommended for portfolio):** Disable the profiler in cloud mode.
+  The deployed API does static analysis + AI only. Add `X-Oracle-Mode: cloud`
+  response header and a note in the Swagger docs.
+- **Option B:** Keep profiling but add a disclaimer — "demo/trusted use only".
+
+Default to Option A. The AI analysis is the interesting part anyway.
+
 **What to build:**
-- `Dockerfile` — containerise the FastAPI service
-- `railway.toml` or `render.yaml` — one-click deploy config for Railway or Render (free tier)
-- `fly.toml` — alternative for Fly.io
-- Environment variable wiring: `ANTHROPIC_API_KEY` set as a secret in the cloud provider
-- `GET /` redirect to `/docs` (FastAPI auto-generated Swagger UI)
-- Rate limiting middleware (1 request / 10 seconds per IP) — prevents runaway costs
-  since each `/analyze` call with agent uses ~1–2 cents of Claude tokens
-- Health check endpoint already done (`GET /health`) ✓
+- `Dockerfile` — containerise the FastAPI service (works for both Railway and GCP)
+- `railway.toml` — Railway deploy config (auto-deploys on every git push)
+- `cloudbuild.yaml` + deploy instructions — GCP Cloud Run config
+- `CLOUD_MODE` env var — when set, profiler returns static-analysis-only result
+  instead of running subprocesses
+- Rate limiting middleware (1 request / 10 seconds per IP) — prevents runaway
+  Claude token costs (~1–2 cents per `/analyze` call with agent)
+- `GET /` redirect to `/docs` (FastAPI Swagger UI)
+- `.env.example` — template showing required env vars
 
 **Files to create:**
 - `Dockerfile`
-- `railway.toml` (or `render.yaml`)
+- `railway.toml`
+- `cloudbuild.yaml`
 - `complexity_oracle/api/middleware.py` — rate limiter
-- `.env.example` — template showing required env vars for deployment
+- `.env.example`
+- Update `complexity_oracle/core/profiler.py` — respect `CLOUD_MODE` env var
 
 **Acceptance criteria:**
 - `docker build . && docker run -p 8000:8000 ...` works locally
-- Deployed URL returns 200 on `GET /health`
-- Swagger UI accessible at deployed URL `/docs`
-- Calling `/analyze` without an API key configured returns 503 with a clear message
+- Railway deployment live and returns 200 on `GET /health`
+- GCP Cloud Run deployment live and returns 200 on `GET /health`
+- In cloud mode: `/analyze` returns static + AI result, no subprocess profiling
+- Swagger UI accessible at both deployed URLs at `/docs`
+- Rate limiter returns 429 after threshold exceeded
 
 ---
 
