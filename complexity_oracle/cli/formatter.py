@@ -99,9 +99,10 @@ def format_report(
 
         lines.append("")
         lines.append(f"  [{agent_result.tokens_used} tokens used]")
+        lines.append("")
 
     # ── Footer ────────────────────────────────────────────────────────────────
-    lines += ["", _RULE, ""]
+    lines += [_RULE, ""]
 
     return "\n".join(lines)
 
