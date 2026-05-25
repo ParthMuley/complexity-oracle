@@ -64,3 +64,12 @@ class Report:
     profile: ProfileResult
     fit: FitResult
     warnings: list[str]
+
+
+@dataclass
+class AgentResult:
+    """Output of the Sprint 2 agent reasoning stage."""
+
+    verdict: str        # plain-English complexity verdict
+    explanation: str    # why static and empirical agree or disagree
+    tokens_used: int    # total tokens consumed across all agent messages
