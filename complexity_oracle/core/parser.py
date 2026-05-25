@@ -7,6 +7,19 @@ from complexity_oracle.models.analysis import Complexity, ParseResult, Unresolve
 
 _BUILTIN_NAMES: frozenset[str] = frozenset(dir(builtins))
 
+# Builtins that have non-trivial complexity — worth flagging even though they
+# are not "unknown".  Keyed by the bare function/method name.
+_EXPENSIVE_BUILTINS: dict[str, str] = {
+    "sorted":   "O(n log n) — Timsort; calling inside a loop raises overall complexity",
+    "sort":     "O(n log n) — list.sort; calling inside a loop raises overall complexity",
+    "max":      "O(n) — linear scan; calling inside a loop raises overall complexity",
+    "min":      "O(n) — linear scan; calling inside a loop raises overall complexity",
+    "sum":      "O(n) — linear scan; calling inside a loop raises overall complexity",
+    "reversed": "O(n) — iterates full sequence",
+    "index":    "O(n) — linear search on list; use a dict or set for O(1) lookup",
+    "count":    "O(n) — linear scan; repeated calls inside a loop are O(n²)",
+}
+
 
 class _ComplexityVisitor(ast.NodeVisitor):
     """Walks a Python AST to extract complexity-relevant information."""
@@ -26,6 +39,15 @@ class _ComplexityVisitor(ast.NodeVisitor):
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self.functions.append(node.name)
         self._defined_names.add(node.name)
+        # Track all parameter names so method calls on them aren't flagged.
+        for arg in (
+            node.args.posonlyargs
+            + node.args.args
+            + node.args.kwonlyargs
+            + ([node.args.vararg] if node.args.vararg else [])
+            + ([node.args.kwarg] if node.args.kwarg else [])
+        ):
+            self._defined_names.add(arg.arg)
         self._check_recursion(node)
         self.generic_visit(node)
 
@@ -33,6 +55,25 @@ class _ComplexityVisitor(ast.NodeVisitor):
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self._defined_names.add(node.name)
+        self.generic_visit(node)
+
+    # -- assignments --------------------------------------------------------
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        """Track assigned names so method calls on local vars aren't flagged."""
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                self._defined_names.add(target.id)
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        if isinstance(node.target, ast.Name):
+            self._defined_names.add(node.target.id)
+        self.generic_visit(node)
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+        if isinstance(node.target, ast.Name):
+            self._defined_names.add(node.target.id)
         self.generic_visit(node)
 
     # -- loops --------------------------------------------------------------
@@ -46,6 +87,13 @@ class _ComplexityVisitor(ast.NodeVisitor):
         self._current_loop_depth -= 1
 
     def visit_For(self, node: ast.For) -> None:
+        # Track loop variable(s) as locally defined.
+        if isinstance(node.target, ast.Name):
+            self._defined_names.add(node.target.id)
+        elif isinstance(node.target, ast.Tuple):
+            for elt in node.target.elts:
+                if isinstance(elt, ast.Name):
+                    self._defined_names.add(elt.id)
         self._enter_loop()
         self.generic_visit(node)
         self._exit_loop()
@@ -87,7 +135,10 @@ class _ComplexityVisitor(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> None:
         name = self._call_name(node.func)
         if name is not None:
+            # The "leaf" name for method calls: `seen.append` → "append"
+            leaf = name.split(".")[-1]
             root = name.split(".")[0]
+
             if root not in _BUILTIN_NAMES:
                 if root in self._imported_names:
                     self.unresolved_calls.append(
@@ -97,6 +148,19 @@ class _ComplexityVisitor(ast.NodeVisitor):
                     self.unresolved_calls.append(
                         UnresolvedCall(name, node.lineno, "Undefined function (not imported or defined locally)")
                     )
+                # Method on a locally-defined variable with known expensive complexity
+                # e.g. haystack.index(x) inside a loop → O(n) per call → O(n²) overall.
+                elif leaf in _EXPENSIVE_BUILTINS and self._current_loop_depth > 0:
+                    hint = _EXPENSIVE_BUILTINS[leaf]
+                    self.unresolved_calls.append(
+                        UnresolvedCall(name, node.lineno, f"Expensive builtin inside loop: {hint}")
+                    )
+            # Flag expensive top-level builtins (sorted/max/min/sum) inside loops.
+            elif (name in _EXPENSIVE_BUILTINS or leaf in _EXPENSIVE_BUILTINS) and self._current_loop_depth > 0:
+                hint = _EXPENSIVE_BUILTINS.get(name) or _EXPENSIVE_BUILTINS.get(leaf, "")
+                self.unresolved_calls.append(
+                    UnresolvedCall(name, node.lineno, f"Expensive builtin inside loop: {hint}")
+                )
         self.generic_visit(node)
 
     # -- helpers ------------------------------------------------------------

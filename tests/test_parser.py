@@ -163,6 +163,124 @@ class TestUnresolvedCalls:
         assert "Undefined" in result.unresolved_calls[0].reason
 
 
+# -- local variable tracking ------------------------------------------------
+
+
+class TestLocalVariableTracking:
+    """Method calls on local variables must NOT be flagged as unresolved."""
+
+    def test_method_on_assigned_variable_not_flagged(self, tmp_path):
+        code = (
+            "def remove_dups(items):\n"
+            "    seen = []\n"
+            "    for x in items:\n"
+            "        if x not in seen:\n"
+            "            seen.append(x)\n"
+            "    return seen\n"
+        )
+        result = parse_file(_write(tmp_path, code))
+        names = [c.name for c in result.unresolved_calls]
+        assert "seen.append" not in names
+
+    def test_method_on_function_param_not_flagged(self, tmp_path):
+        code = (
+            "def process(data):\n"
+            "    result = []\n"
+            "    for x in data:\n"
+            "        result.append(x * 2)\n"
+            "    return result\n"
+        )
+        result = parse_file(_write(tmp_path, code))
+        names = [c.name for c in result.unresolved_calls]
+        assert "data.append" not in names
+        assert "result.append" not in names
+
+    def test_loop_variable_not_flagged(self, tmp_path):
+        code = (
+            "def process(items):\n"
+            "    for item in items:\n"
+            "        item.strip()\n"
+        )
+        result = parse_file(_write(tmp_path, code))
+        names = [c.name for c in result.unresolved_calls]
+        assert "item.strip" not in names
+
+    def test_annotated_assignment_not_flagged(self, tmp_path):
+        code = (
+            "def process():\n"
+            "    result: list = []\n"
+            "    result.append(1)\n"
+            "    return result\n"
+        )
+        result = parse_file(_write(tmp_path, code))
+        names = [c.name for c in result.unresolved_calls]
+        assert "result.append" not in names
+
+    def test_tuple_unpack_loop_var_not_flagged(self, tmp_path):
+        code = (
+            "def process(pairs):\n"
+            "    for k, v in pairs:\n"
+            "        k.upper()\n"
+        )
+        result = parse_file(_write(tmp_path, code))
+        names = [c.name for c in result.unresolved_calls]
+        assert "k.upper" not in names
+
+
+# -- expensive builtins -------------------------------------------------------
+
+
+class TestExpensiveBuiltins:
+    """sorted/max/min/sum inside loops should be flagged as expensive."""
+
+    def test_sorted_inside_loop_flagged(self, tmp_path):
+        code = (
+            "def f(matrix):\n"
+            "    for row in matrix:\n"
+            "        sorted(row)\n"
+        )
+        result = parse_file(_write(tmp_path, code))
+        names = [c.name for c in result.unresolved_calls]
+        assert "sorted" in names
+
+    def test_sorted_outside_loop_not_flagged(self, tmp_path):
+        code = "result = sorted([3, 1, 2])\n"
+        result = parse_file(_write(tmp_path, code))
+        assert result.unresolved_calls == []
+
+    def test_max_inside_loop_flagged(self, tmp_path):
+        code = (
+            "def f(rows):\n"
+            "    for r in rows:\n"
+            "        max(r)\n"
+        )
+        result = parse_file(_write(tmp_path, code))
+        names = [c.name for c in result.unresolved_calls]
+        assert "max" in names
+
+    def test_list_index_inside_loop_flagged(self, tmp_path):
+        code = (
+            "def f(data):\n"
+            "    haystack = list(data)\n"
+            "    for x in data:\n"
+            "        haystack.index(x)\n"
+        )
+        result = parse_file(_write(tmp_path, code))
+        names = [c.name for c in result.unresolved_calls]
+        assert "haystack.index" in names
+
+    def test_expensive_builtin_reason_mentions_loop(self, tmp_path):
+        code = (
+            "def f(matrix):\n"
+            "    for row in matrix:\n"
+            "        sorted(row)\n"
+        )
+        result = parse_file(_write(tmp_path, code))
+        reasons = [c.reason for c in result.unresolved_calls if c.name == "sorted"]
+        assert len(reasons) == 1
+        assert "loop" in reasons[0].lower()
+
+
 # -- async -------------------------------------------------------------------
 
 

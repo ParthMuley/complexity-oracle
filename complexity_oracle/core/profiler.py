@@ -31,6 +31,24 @@ def _build_runner_script(file_path: str, function_name: str, n: int) -> str:
     )
 
 
+def _is_recursive(file_path: str, function_name: str) -> bool:
+    """Return True if *function_name* contains a direct recursive call.
+
+    Imports the parser lazily to avoid a circular dependency at module load time.
+    Returns False if the file cannot be parsed (caller will handle the error).
+    """
+    try:
+        from complexity_oracle.core.parser import parse_file  # lazy import
+        result = parse_file(file_path)
+        return any(
+            function_name in msg
+            for msg in result.flagged_lines.values()
+            if "Recursive call" in msg
+        )
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def profile_file(
     file_path: str,
     function_name: str,
@@ -50,6 +68,19 @@ def profile_file(
             runtimes_ms=[],
             timed_out=False,
             error=f"File not found: {file_path}",
+        )
+
+    # Skip profiling for recursive functions — empirical results would be
+    # misleading (stack depth depends on input size, not just algorithmic work).
+    if _is_recursive(file_path, function_name):
+        return ProfileResult(
+            input_sizes=[],
+            runtimes_ms=[],
+            timed_out=False,
+            error=(
+                "Recursive function — empirical profiling skipped. "
+                "Complexity depends on recursion depth and algorithm structure."
+            ),
         )
 
     collected_sizes: list[int] = []

@@ -143,6 +143,47 @@ class TestErrorHandling:
 
 
 # ---------------------------------------------------------------------------
+# TestRecursionSkip
+# ---------------------------------------------------------------------------
+
+
+class TestRecursionSkip:
+    _RECURSIVE_CODE = (
+        "def factorial(n):\n"
+        "    if n <= 1:\n"
+        "        return 1\n"
+        "    return n * factorial(n - 1)\n"
+    )
+
+    def test_recursive_function_skipped(self, tmp_path):
+        path = _write(tmp_path, self._RECURSIVE_CODE)
+        result = profile_file(path, "factorial")
+        assert result.error is not None
+
+    def test_recursive_skip_error_mentions_recursion(self, tmp_path):
+        path = _write(tmp_path, self._RECURSIVE_CODE)
+        result = profile_file(path, "factorial")
+        assert "recursive" in result.error.lower()
+
+    def test_recursive_skip_returns_empty_lists(self, tmp_path):
+        path = _write(tmp_path, self._RECURSIVE_CODE)
+        result = profile_file(path, "factorial")
+        assert result.input_sizes == []
+        assert result.runtimes_ms == []
+
+    def test_recursive_skip_timed_out_false(self, tmp_path):
+        path = _write(tmp_path, self._RECURSIVE_CODE)
+        result = profile_file(path, "factorial")
+        assert result.timed_out is False
+
+    def test_non_recursive_function_profiled_normally(self, tmp_path):
+        path = _write(tmp_path, _LINEAR_CODE)
+        result = profile_file(path, "linear")
+        assert result.error is None
+        assert len(result.input_sizes) == 4
+
+
+# ---------------------------------------------------------------------------
 # TestProfileResultContract
 # ---------------------------------------------------------------------------
 
