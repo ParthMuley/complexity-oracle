@@ -60,8 +60,20 @@ def profile_file(
     Each run executes in an isolated subprocess; the main process is never exposed
     to user code.
 
+    When the CLOUD_MODE environment variable is set, profiling is disabled and a
+    stub result is returned immediately — running arbitrary user code in a public
+    cloud endpoint is a security risk.
+
     Raises nothing — errors are captured in ProfileResult.error.
     """
+    if os.environ.get("CLOUD_MODE"):
+        return ProfileResult(
+            input_sizes=[],
+            runtimes_ms=[],
+            timed_out=False,
+            error="Profiling disabled in cloud mode.",
+        )
+
     if not os.path.isfile(file_path):
         return ProfileResult(
             input_sizes=[],

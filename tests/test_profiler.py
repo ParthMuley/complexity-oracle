@@ -188,6 +188,49 @@ class TestRecursionSkip:
 # ---------------------------------------------------------------------------
 
 
+class TestCloudMode:
+    """CLOUD_MODE env var disables profiling and returns a stub immediately."""
+
+    def test_cloud_mode_returns_stub(self, tmp_path, monkeypatch):
+        path = _write(tmp_path, _LINEAR_CODE)
+        monkeypatch.setenv("CLOUD_MODE", "true")
+        result = profile_file(path, "linear")
+        assert result.input_sizes == []
+        assert result.runtimes_ms == []
+        assert result.timed_out is False
+        assert result.error is not None
+
+    def test_cloud_mode_error_mentions_cloud(self, tmp_path, monkeypatch):
+        path = _write(tmp_path, _LINEAR_CODE)
+        monkeypatch.setenv("CLOUD_MODE", "true")
+        result = profile_file(path, "linear")
+        assert "cloud" in result.error.lower()
+
+    def test_cloud_mode_does_not_run_subprocess(self, tmp_path, monkeypatch):
+        """Verify no subprocess is spawned — code never actually executes."""
+        path = _write(tmp_path, _LINEAR_CODE)
+        monkeypatch.setenv("CLOUD_MODE", "true")
+        import subprocess
+        original_run = subprocess.run
+        calls = []
+
+        def spy(*args, **kwargs):
+            calls.append(args)
+            return original_run(*args, **kwargs)
+
+        monkeypatch.setattr(subprocess, "run", spy)
+        profile_file(path, "linear")
+        assert calls == []
+
+    def test_without_cloud_mode_runs_normally(self, tmp_path, monkeypatch):
+        """Sanity check: without CLOUD_MODE, profiling still works."""
+        path = _write(tmp_path, _LINEAR_CODE)
+        monkeypatch.delenv("CLOUD_MODE", raising=False)
+        result = profile_file(path, "linear")
+        assert result.error is None
+        assert len(result.input_sizes) == 4
+
+
 class TestProfileResultContract:
     def test_field_types(self, tmp_path):
         path = _write(tmp_path, _LINEAR_CODE)

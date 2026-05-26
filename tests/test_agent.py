@@ -123,13 +123,13 @@ class TestMissingApiKey:
     def test_raises_environment_error_when_key_missing(self):
         with patch.dict(os.environ, {}, clear=True):
             os.environ.pop("ANTHROPIC_API_KEY", None)
-            with pytest.raises(EnvironmentError, match="ANTHROPIC_API_KEY"):
+            with pytest.raises(EnvironmentError, match="No Anthropic API key"):
                 run_agent("f.py", "fn")
 
-    def test_error_message_mentions_console(self):
+    def test_error_message_mentions_setup(self):
         with patch.dict(os.environ, {}, clear=True):
             os.environ.pop("ANTHROPIC_API_KEY", None)
-            with pytest.raises(EnvironmentError, match="console.anthropic.com"):
+            with pytest.raises(EnvironmentError, match="oracle setup"):
                 run_agent("f.py", "fn")
 
 

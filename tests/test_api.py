@@ -249,7 +249,7 @@ class TestAnalyzeErrors:
             })
         assert r.status_code == 200
 
-    def test_no_api_key_with_agent_returns_503(self):
+    def test_no_key_anywhere_with_agent_returns_401(self):
         with (
             patch(f"{_PIPELINE}.parse_file", return_value=_parse()),
             patch(f"{_PIPELINE}.profile_file", return_value=_profile()),
@@ -259,8 +259,8 @@ class TestAnalyzeErrors:
         ):
             os.environ.pop("ANTHROPIC_API_KEY", None)
             r = client.post("/analyze", json={"code": "def f(x): pass", "no_agent": False})
-        assert r.status_code == 503
-        assert "oracle setup" in r.json()["detail"]
+        assert r.status_code == 401
+        assert "X-Anthropic-API-Key" in r.json()["detail"]
 
 
 # ── Request defaults ───────────────────────────────────────────────────────────
@@ -307,3 +307,130 @@ class TestRequestDefaults:
             client.post("/analyze", json={"code": "def f(x): pass", "no_agent": True, "timeout_s": 2.5})
             call_kwargs = mock_profiler.call_args.kwargs
             assert call_kwargs.get("timeout_s") == 2.5
+
+
+# ── Key resolution ─────────────────────────────────────────────────────────────
+
+class TestKeyResolution:
+    """X-Anthropic-API-Key header takes precedence over env var; neither → 401."""
+
+    @pytest.fixture(autouse=True)
+    def mock_pipeline(self):
+        with (
+            patch(f"{_PIPELINE}.parse_file", return_value=_parse()),
+            patch(f"{_PIPELINE}.profile_file", return_value=_profile()),
+            patch(f"{_PIPELINE}.fit_curve", return_value=_fit()),
+            patch(f"{_PIPELINE}.build_report", return_value=_report()),
+        ):
+            yield
+
+    def test_header_key_used_when_provided(self):
+        with patch(f"{_PIPELINE}.run_agent", return_value=_agent_result()) as mock_agent:
+            r = client.post(
+                "/analyze",
+                json={"code": "def f(x): pass", "no_agent": False},
+                headers={"X-Anthropic-API-Key": "sk-ant-header"},
+            )
+        assert r.status_code == 200
+        mock_agent.assert_called_once()
+        _, call_kwargs = mock_agent.call_args
+        assert call_kwargs.get("api_key") == "sk-ant-header"
+
+    def test_env_key_used_as_fallback(self):
+        with (
+            patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-ant-env"}),
+            patch(f"{_PIPELINE}.run_agent", return_value=_agent_result()) as mock_agent,
+        ):
+            r = client.post("/analyze", json={"code": "def f(x): pass", "no_agent": False})
+        assert r.status_code == 200
+        mock_agent.assert_called_once()
+        _, call_kwargs = mock_agent.call_args
+        assert call_kwargs.get("api_key") == "sk-ant-env"
+
+    def test_header_key_takes_precedence_over_env(self):
+        with (
+            patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-ant-env"}),
+            patch(f"{_PIPELINE}.run_agent", return_value=_agent_result()) as mock_agent,
+        ):
+            r = client.post(
+                "/analyze",
+                json={"code": "def f(x): pass", "no_agent": False},
+                headers={"X-Anthropic-API-Key": "sk-ant-header"},
+            )
+        assert r.status_code == 200
+        _, call_kwargs = mock_agent.call_args
+        assert call_kwargs.get("api_key") == "sk-ant-header"
+
+    def test_neither_key_returns_401(self):
+        with patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+            r = client.post("/analyze", json={"code": "def f(x): pass", "no_agent": False})
+        assert r.status_code == 401
+        assert "X-Anthropic-API-Key" in r.json()["detail"]
+
+    def test_no_key_needed_when_no_agent(self):
+        with patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+            r = client.post("/analyze", json={"code": "def f(x): pass", "no_agent": True})
+        assert r.status_code == 200
+
+
+# ── CLOUD_MODE ─────────────────────────────────────────────────────────────────
+
+class TestCloudMode:
+    """CLOUD_MODE skips profiling, sets profiling_disabled=True in response."""
+
+    @pytest.fixture(autouse=True)
+    def mock_parse_report(self):
+        with (
+            patch(f"{_PIPELINE}.parse_file", return_value=_parse()),
+            patch(f"{_PIPELINE}.build_report", return_value=_report()),
+        ):
+            yield
+
+    def test_cloud_mode_returns_200(self):
+        with patch.dict(os.environ, {"CLOUD_MODE": "true"}):
+            r = client.post("/analyze", json={"code": "def f(x): pass", "no_agent": True})
+        assert r.status_code == 200
+
+    def test_cloud_mode_profiling_disabled_true(self):
+        with patch.dict(os.environ, {"CLOUD_MODE": "true"}):
+            r = client.post("/analyze", json={"code": "def f(x): pass", "no_agent": True})
+        assert r.json()["profiling_disabled"] is True
+
+    def test_normal_mode_profiling_disabled_false(self):
+        with (
+            patch(f"{_PIPELINE}.profile_file", return_value=_profile()),
+            patch(f"{_PIPELINE}.fit_curve", return_value=_fit()),
+            patch.dict(os.environ, {}, clear=True),
+        ):
+            os.environ.pop("CLOUD_MODE", None)
+            r = client.post("/analyze", json={"code": "def f(x): pass", "no_agent": True})
+        assert r.json()["profiling_disabled"] is False
+
+    def test_cloud_mode_does_not_call_profile_file(self):
+        with (
+            patch(f"{_PIPELINE}.profile_file") as mock_profiler,
+            patch(f"{_PIPELINE}.fit_curve", return_value=_fit()),
+            patch.dict(os.environ, {"CLOUD_MODE": "true"}),
+        ):
+            client.post("/analyze", json={"code": "def f(x): pass", "no_agent": True})
+        mock_profiler.assert_not_called()
+
+    def test_cloud_mode_does_not_call_fit_curve(self):
+        with (
+            patch(f"{_PIPELINE}.profile_file", return_value=_profile()),
+            patch(f"{_PIPELINE}.fit_curve") as mock_fit,
+            patch.dict(os.environ, {"CLOUD_MODE": "true"}),
+        ):
+            client.post("/analyze", json={"code": "def f(x): pass", "no_agent": True})
+        mock_fit.assert_not_called()
+
+    def test_cloud_mode_agent_receives_cloud_mode_flag(self):
+        with (
+            patch(f"{_PIPELINE}.run_agent", return_value=_agent_result()) as mock_agent,
+            patch.dict(os.environ, {"CLOUD_MODE": "true", "ANTHROPIC_API_KEY": "sk-ant-test"}),
+        ):
+            client.post("/analyze", json={"code": "def f(x): pass", "no_agent": False})
+        _, call_kwargs = mock_agent.call_args
+        assert call_kwargs.get("cloud_mode") is True

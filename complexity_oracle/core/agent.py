@@ -47,22 +47,43 @@ Rules:
 - Only include CODE if you are showing a concrete code improvement.
 """
 
+_CLOUD_MODE_ADDENDUM = """\
 
-def run_agent(file_path: str, function_name: str) -> AgentResult:
+NOTE: Runtime profiling is disabled in this environment. The run_profiler tool
+will return an error — skip it entirely. Base your analysis on static code
+analysis only: call analyze_ast, then call fit_curve with empty profiling data
+(input_sizes=[], runtimes_ms=[], timed_out=false, static_complexity from ast result).
+Your VERDICT and WHY must be based on the code structure alone.
+"""
+
+
+def run_agent(
+    file_path: str,
+    function_name: str,
+    api_key: str | None = None,
+    cloud_mode: bool = False,
+) -> AgentResult:
     """Run the oracle agent on a single function.
 
-    Raises EnvironmentError if ANTHROPIC_API_KEY is not set.
+    Args:
+        file_path:     Path to the Python file to analyse.
+        function_name: Name of the function to analyse.
+        api_key:       Anthropic API key. Falls back to ANTHROPIC_API_KEY env var.
+        cloud_mode:    When True, profiling is disabled — agent uses static analysis only.
+
+    Raises EnvironmentError if no API key is available from either source.
     Raises anthropic.APIError on API failures.
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
+    resolved_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+    if not resolved_key:
         raise EnvironmentError(
-            "ANTHROPIC_API_KEY environment variable is not set. "
-            "Get a key at console.anthropic.com and set it with:\n"
-            "  $env:ANTHROPIC_API_KEY = 'sk-ant-...'"
+            "No Anthropic API key available. "
+            "Run 'oracle setup' to configure one, or pass it via the X-Anthropic-API-Key header."
         )
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=resolved_key)
+
+    system = SYSTEM_PROMPT + (_CLOUD_MODE_ADDENDUM if cloud_mode else "")
 
     messages: list[dict] = [
         {
@@ -80,7 +101,7 @@ def run_agent(file_path: str, function_name: str) -> AgentResult:
         response = client.messages.create(
             model=MODEL,
             max_tokens=MAX_TOKENS,
-            system=SYSTEM_PROMPT,
+            system=system,
             tools=TOOL_DEFINITIONS,
             messages=messages,
         )

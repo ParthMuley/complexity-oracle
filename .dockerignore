@@ -1,0 +1,38 @@
+# Dependencies / build artifacts
+.venv/
+*.egg-info/
+dist/
+build/
+__pycache__/
+*.pyc
+*.pyo
+
+# Version control
+.git/
+.gitignore
+
+# Tests (not needed in production image)
+tests/
+
+# Local config (never bake secrets into the image)
+.env
+.env.*
+!.env.example
+
+# Dev / docs
+SESSION_LOG.md
+LAYMAN_GUIDE.md
+PROJECT_SCOPE.md
+CLAUDE.md
+*.md
+
+# Demo files
+demo*.py
+sample_on2.py
+
+# CI / tooling
+.github/
+.claude/
+.pytest_cache/
+.coverage
+coverage.xml

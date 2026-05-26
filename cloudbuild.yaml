@@ -1,0 +1,71 @@
+# Complexity Oracle — GCP Cloud Build CI/CD pipeline
+#
+# This is the PUBLIC SERVER configuration (bring-your-own-key).
+# No ANTHROPIC_API_KEY is set — callers must pass X-Anthropic-API-Key header.
+#
+# Prerequisites:
+#   1. Enable APIs: Cloud Build, Cloud Run, Container Registry
+#      gcloud services enable cloudbuild.googleapis.com run.googleapis.com containerregistry.googleapis.com
+#
+#   2. Grant Cloud Build the Cloud Run Admin role:
+#      gcloud projects add-iam-policy-binding $PROJECT_ID \
+#        --member="serviceAccount:$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')@cloudbuild.gserviceaccount.com" \
+#        --role="roles/run.admin"
+#
+#   3. Trigger a build:
+#      gcloud builds submit --config cloudbuild.yaml .
+#
+# To deploy manually without Cloud Build:
+#   docker build -t gcr.io/$PROJECT_ID/complexity-oracle .
+#   docker push gcr.io/$PROJECT_ID/complexity-oracle
+#   gcloud run deploy complexity-oracle \
+#     --image gcr.io/$PROJECT_ID/complexity-oracle \
+#     --platform managed \
+#     --region us-central1 \
+#     --allow-unauthenticated \
+#     --set-env-vars CLOUD_MODE=true,RATE_LIMIT=10/minute
+
+steps:
+  # Step 1 — Build and tag the image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/complexity-oracle:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/complexity-oracle:latest'
+      - '.'
+
+  # Step 2 — Push commit-tagged image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/complexity-oracle:$COMMIT_SHA'
+
+  # Step 3 — Push latest tag
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/complexity-oracle:latest'
+
+  # Step 4 — Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'complexity-oracle'
+      - '--image=gcr.io/$PROJECT_ID/complexity-oracle:$COMMIT_SHA'
+      - '--platform=managed'
+      - '--region=us-central1'
+      - '--allow-unauthenticated'
+      - '--memory=512Mi'
+      - '--cpu=1'
+      - '--max-instances=10'
+      - '--set-env-vars=CLOUD_MODE=true,RATE_LIMIT=10/minute'
+      # Note: ANTHROPIC_API_KEY is intentionally NOT set here.
+      # Callers must supply their own key via X-Anthropic-API-Key header.
+
+images:
+  - 'gcr.io/$PROJECT_ID/complexity-oracle:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/complexity-oracle:latest'
