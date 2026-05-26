@@ -260,7 +260,7 @@ class TestAnalyzeErrors:
             os.environ.pop("ANTHROPIC_API_KEY", None)
             r = client.post("/analyze", json={"code": "def f(x): pass", "no_agent": False})
         assert r.status_code == 503
-        assert "ANTHROPIC_API_KEY" in r.json()["detail"]
+        assert "oracle setup" in r.json()["detail"]
 
 
 # ── Request defaults ───────────────────────────────────────────────────────────

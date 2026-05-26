@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -25,6 +26,7 @@ from complexity_oracle.core.profiler import profile_file
 from complexity_oracle.core.report import build_report
 
 load_dotenv()
+load_dotenv(Path.home() / ".complexity_oracle" / ".env")
 
 app = FastAPI(
     title="Complexity Oracle API",
@@ -126,8 +128,8 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
                 raise HTTPException(
                     status_code=503,
                     detail=(
-                        "ANTHROPIC_API_KEY is not set. "
-                        "Set the environment variable or pass no_agent=true to skip the agent."
+                        "Anthropic API key not found. "
+                        "Run 'oracle setup' to configure it, or pass no_agent=true to skip the agent."
                     ),
                 )
             agent_result = run_agent(tmp_path, function_name)

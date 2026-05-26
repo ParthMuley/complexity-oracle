@@ -3,10 +3,15 @@ from __future__ import annotations
 import argparse
 import io
 import sys
+from pathlib import Path
 
-# Load .env file if present (before any env var reads)
+# Load .env files before any env-var reads.
+# Precedence (first-one-wins with override=False):
+#   1. local .env in cwd       — explicit project override
+#   2. ~/.complexity_oracle/.env — saved by `oracle setup`
 from dotenv import load_dotenv
 load_dotenv()
+load_dotenv(Path.home() / ".complexity_oracle" / ".env")
 
 # Ensure stdout can handle Unicode (e.g. ═, ⚠, ✓) on Windows terminals.
 if hasattr(sys.stdout, "buffer"):
@@ -19,6 +24,7 @@ from complexity_oracle.core.profiler import profile_file
 from complexity_oracle.core.report import build_report
 from complexity_oracle.core.scanner import scan_folder
 from complexity_oracle.cli.formatter import print_folder_report, print_report
+from complexity_oracle.cli.setup import run_setup
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -53,6 +59,21 @@ def _build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Skip the AI agent step. Prints static + empirical results only (no LLM call).",
     )
+
+    setup = sub.add_parser("setup", help="Configure your Anthropic API key.")
+    setup.add_argument(
+        "--key",
+        default=None,
+        metavar="SK_ANT_KEY",
+        help="API key to save (skips the interactive prompt).",
+    )
+    setup.add_argument(
+        "--force", "-f",
+        action="store_true",
+        default=False,
+        help="Overwrite an existing key without asking for confirmation.",
+    )
+
     return parser
 
 
@@ -60,7 +81,9 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
-    if args.command == "analyze":
+    if args.command == "setup":
+        run_setup(key=args.key, force=args.force)
+    elif args.command == "analyze":
         import os
         if os.path.isdir(args.file):
             _run_folder(args.file, args.recursive, args.timeout)
@@ -129,9 +152,9 @@ def _run_analyze(
         import os
         if not os.environ.get("ANTHROPIC_API_KEY"):
             print(
-                "Error: ANTHROPIC_API_KEY is not set.\n"
-                "Set it with:  $env:ANTHROPIC_API_KEY = 'sk-ant-...'\n"
-                "Or skip the agent with:  --no-agent",
+                "Error: Anthropic API key not found.\n"
+                "Run:  oracle setup          (to configure your key)\n"
+                "Or:   oracle analyze --no-agent  (to skip the AI step)",
                 file=sys.stderr,
             )
             sys.exit(1)
