@@ -175,7 +175,7 @@ function esc(s) {
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-const API_BASE = '%%API_BASE%%';
+const API_BASE = '';
 
 const keyEl = document.getElementById('key');
 keyEl.value = sessionStorage.getItem('oracle_key') || '';
@@ -372,21 +372,10 @@ def _resolve_api_key(request: Request) -> str | None:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
-_CLOUD_RUN_URL = "https://complexity-oracle-1049073599817.us-central1.run.app"
-
-
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 def index() -> HTMLResponse:
-    """Serve the browser web UI.
-
-    The JS ``API_BASE`` variable is injected server-side from the
-    ``API_BASE_URL`` env var (defaults to the Cloud Run URL).  Set
-    ``API_BASE_URL=http://localhost:8000`` to point the local UI at the
-    local backend instead.
-    """
-    api_base = os.environ.get("API_BASE_URL", _CLOUD_RUN_URL).rstrip("/")
-    html = _HTML.replace("%%API_BASE%%", api_base)
-    return HTMLResponse(content=html)
+    """Serve the browser web UI."""
+    return HTMLResponse(content=_HTML)
 
 
 @app.get("/health", summary="Liveness check")
