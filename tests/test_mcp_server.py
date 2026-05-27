@@ -1,11 +1,41 @@
-"""Tests for mcp/server.py — MCP tool registrations."""
+"""Tests for mcp/server.py — MCP tool registrations and SSE mount."""
 from __future__ import annotations
 
 from unittest.mock import patch
 
 import pytest
+from fastapi.testclient import TestClient
 
+from complexity_oracle.api.app import app
 from complexity_oracle.mcp.server import mcp, analyze_ast, run_profiler, fit_curve
+
+api_client = TestClient(app, raise_server_exceptions=True)
+# MCP SSE security validates the Host header — use localhost to pass it
+mcp_client = TestClient(app, base_url="http://localhost", raise_server_exceptions=True)
+
+
+# ── SSE mount (/mcp) ─────────────────────────────────────────────────────────
+
+class TestSSEMount:
+    """Verify the /mcp SSE sub-app is mounted on the FastAPI app.
+
+    SSE connections are persistent streams that never close — making a live
+    HTTP call in a test would hang. Instead we inspect the app's route table,
+    which is sufficient to prove the mount is wired up correctly.
+    """
+
+    def test_mcp_path_is_mounted(self):
+        mounted_paths = [str(r.path) for r in app.routes if hasattr(r, "path")]
+        assert "/mcp" in mounted_paths
+
+    def test_mcp_mount_is_an_asgi_app(self):
+        from starlette.routing import Mount
+        mcp_mount = next(
+            (r for r in app.routes if hasattr(r, "path") and r.path == "/mcp"),
+            None,
+        )
+        assert mcp_mount is not None
+        assert isinstance(mcp_mount, Mount)
 
 
 # ── Server identity ───────────────────────────────────────────────────────────

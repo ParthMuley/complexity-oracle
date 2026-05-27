@@ -8,23 +8,42 @@ Tools:
   run_profiler — empirical runtime profiling at four input sizes
   fit_curve    — scipy curve fitting → complexity class + mismatch detection
 
-Run as a standalone server (stdio transport — standard for local MCP):
+── Transports ────────────────────────────────────────────────────────────────
+
+stdio (local — default):
   python -m complexity_oracle.mcp.server
 
-Or register in Claude Desktop / Claude Code (claude_desktop_config.json):
-  {
-    "mcpServers": {
-      "complexity-oracle": {
-        "command": "python",
-        "args": ["-m", "complexity_oracle.mcp.server"],
-        "cwd": "/path/to/complexity_oracle"
+  Register in Claude Desktop / Claude Code (.claude/settings.json):
+    {
+      "mcpServers": {
+        "complexity-oracle": {
+          "command": "python",
+          "args": ["-m", "complexity_oracle.mcp.server"],
+          "cwd": "/path/to/complexity_oracle"
+        }
       }
     }
-  }
+
+SSE (remote — mounted on FastAPI at /mcp):
+  The FastAPI app mounts sse_app() at /mcp.
+  Connect from Claude Code with:
+    {
+      "mcpServers": {
+        "complexity-oracle": {
+          "type": "sse",
+          "url": "https://<cloud-run-url>/mcp"
+        }
+      }
+    }
+
+  Note: run_profiler returns a stub in CLOUD_MODE (profiling disabled for
+  security on shared servers). For full empirical profiling use stdio mode
+  against a local install.
 """
 from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from complexity_oracle.mcp.tools import (
     _adapter_analyze_ast,
@@ -41,6 +60,9 @@ mcp = FastMCP(
         "Use analyze_ast first, then run_profiler, then fit_curve "
         "to determine the true algorithmic complexity of a Python function."
     ),
+    # Disable DNS rebinding protection — this is a developer tool accessed by
+    # MCP clients (Claude Code), not a browser-facing service.
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
 )
 
 
@@ -139,7 +161,14 @@ def fit_curve(
     )
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# ── ASGI app for SSE transport (mounted by api/app.py at /mcp) ───────────────
+
+def get_sse_app():
+    """Return the FastMCP SSE ASGI app for mounting on FastAPI."""
+    return mcp.sse_app()
+
+
+# ── Entry point (stdio transport) ─────────────────────────────────────────────
 
 if __name__ == "__main__":
     mcp.run()
