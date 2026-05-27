@@ -80,6 +80,30 @@ def _agent_result() -> AgentResult:
 # Patch target for all pipeline functions inside the api module
 _PIPELINE = "complexity_oracle.api.app"
 
+# ── GET / — Web UI ────────────────────────────────────────────────────────────
+
+class TestWebUI:
+    def test_get_root_returns_200(self):
+        r = client.get("/")
+        assert r.status_code == 200
+
+    def test_get_root_content_type_is_html(self):
+        r = client.get("/")
+        assert "text/html" in r.headers["content-type"]
+
+    def test_get_root_contains_form(self):
+        r = client.get("/")
+        assert "<form" in r.text
+
+    def test_get_root_contains_code_textarea(self):
+        r = client.get("/")
+        assert "<textarea" in r.text
+
+    def test_get_root_contains_api_key_input(self):
+        r = client.get("/")
+        assert 'type="password"' in r.text
+
+
 # ── Health check ──────────────────────────────────────────────────────────────
 
 class TestHealthEndpoint:

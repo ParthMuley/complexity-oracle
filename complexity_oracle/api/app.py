@@ -3,6 +3,7 @@
 Exposes the oracle pipeline as a REST API.
 
 Endpoints:
+  GET  /             — browser web UI
   GET  /health        — liveness check
   POST /analyze       — analyse a Python function for complexity
 
@@ -26,6 +27,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -40,6 +42,243 @@ from complexity_oracle.models.analysis import Complexity, FitResult, ProfileResu
 
 load_dotenv()
 load_dotenv(Path.home() / ".complexity_oracle" / ".env")
+
+# ── Browser UI (inline — no template files needed) ────────────────────────────
+
+_HTML = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Complexity Oracle</title>
+<style>
+:root{
+  --bg:#0d1117;--surface:#161b22;--border:#30363d;
+  --text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;
+  --red:#f85149;--green:#3fb950;--yellow:#e3b341;--orange:#f0883e;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh}
+header{padding:1.25rem 2rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:.75rem}
+header h1{font-size:1.2rem;font-weight:600}
+main{max-width:740px;margin:2rem auto;padding:0 1rem;display:flex;flex-direction:column;gap:1rem}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1.25rem;display:flex;flex-direction:column;gap:.85rem}
+label{font-size:.82rem;font-weight:500;color:var(--muted);display:block}
+.optional{font-weight:400;font-size:.78rem}
+input[type=text],input[type=password],textarea{
+  background:var(--bg);border:1px solid var(--border);border-radius:6px;
+  color:var(--text);padding:.5rem .75rem;font-size:.875rem;width:100%;
+  transition:border-color .15s;
+}
+input:focus,textarea:focus{outline:none;border-color:var(--accent)}
+textarea{font-family:'SF Mono','Fira Code','Cascadia Code',monospace;resize:vertical;min-height:210px;line-height:1.5}
+.key-wrap{position:relative;margin-top:.4rem}
+.key-wrap input{padding-right:2.5rem}
+.eye-btn{position:absolute;right:.5rem;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);font-size:.95rem;padding:.25rem;line-height:1}
+.hint{font-size:.73rem;color:var(--muted)}
+.row{display:flex;gap:1rem;align-items:flex-end;flex-wrap:wrap}
+.row>div{flex:1;min-width:160px;display:flex;flex-direction:column;gap:.4rem}
+.cb-label{display:flex;align-items:center;gap:.5rem;font-size:.85rem;cursor:pointer;white-space:nowrap;padding-bottom:.15rem;color:var(--text)}
+.cb-label input{width:auto;accent-color:var(--accent)}
+#submit-btn{
+  background:var(--accent);color:#0d1117;border:none;border-radius:6px;
+  padding:.6rem 1.5rem;font-size:.9rem;font-weight:600;cursor:pointer;
+  align-self:flex-start;transition:opacity .15s;
+}
+#submit-btn:disabled{opacity:.55;cursor:not-allowed}
+.error-banner{background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.5);border-radius:8px;padding:1rem 1.25rem;color:var(--red);font-size:.875rem}
+.result-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:1.25rem;display:flex;flex-direction:column;gap:1rem}
+.result-header{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap}
+.fn-name{font-weight:600;font-size:1rem;font-family:monospace}
+.badges{display:flex;gap:.75rem;flex-wrap:wrap}
+.badge-group{display:flex;flex-direction:column;align-items:center;gap:.2rem}
+.badge-group .lbl{font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.badge{border-radius:4px;padding:.2rem .65rem;font-size:.82rem;font-weight:700;font-family:monospace}
+.r2{font-size:.75rem;color:var(--muted);margin-left:auto;white-space:nowrap}
+.agree-banner{background:rgba(63,185,80,.1);border:1px solid rgba(63,185,80,.35);border-radius:6px;padding:.7rem 1rem;font-size:.85rem;color:var(--green)}
+.mismatch-banner{background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.35);border-radius:6px;padding:.7rem 1rem;font-size:.85rem;color:var(--red)}
+.cloud-note{font-size:.75rem;color:var(--muted);font-style:italic}
+.section-title{font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em}
+.agent-grid{display:flex;flex-direction:column;gap:.5rem}
+.agent-row{background:var(--bg);border-radius:6px;padding:.75rem;font-size:.875rem;line-height:1.5}
+.agent-row strong{display:block;font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.3rem}
+pre.snippet{background:var(--bg);border-radius:6px;padding:.75rem;font-size:.8rem;overflow-x:auto;white-space:pre-wrap;word-break:break-all;margin-top:.35rem;border:1px solid var(--border)}
+.divider{border:none;border-top:1px solid var(--border)}
+.warnings{display:flex;flex-direction:column;gap:.35rem}
+.warning-item{font-size:.8rem;color:var(--yellow)}
+.spinner{display:inline-block;width:.9em;height:.9em;border:2px solid rgba(13,17,23,.4);border-top-color:#0d1117;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:.4rem}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<header>
+  <span style="font-size:1.4rem">🔬</span>
+  <h1>Complexity Oracle</h1>
+  <span style="margin-left:auto;font-size:.78rem;color:var(--muted)">Static + Empirical Analysis</span>
+</header>
+<main>
+  <form id="form" class="card">
+    <div>
+      <label for="key">Anthropic API Key</label>
+      <div class="key-wrap">
+        <input type="password" id="key" placeholder="sk-ant-api03-…" autocomplete="off" spellcheck="false">
+        <button type="button" class="eye-btn" id="toggle-key" title="Show / hide key">👁</button>
+      </div>
+      <p class="hint" style="margin-top:.4rem">Stored in <code>sessionStorage</code> only — cleared when the tab closes, never sent to our server at rest.</p>
+    </div>
+    <div>
+      <label for="code">Python Code</label>
+      <textarea id="code" rows="12" placeholder="def bubble_sort(arr):&#10;    for i in range(len(arr)):&#10;        for j in range(len(arr) - i - 1):&#10;            if arr[j] > arr[j+1]:&#10;                arr[j], arr[j+1] = arr[j+1], arr[j]" style="margin-top:.4rem"></textarea>
+    </div>
+    <div class="row">
+      <div>
+        <label for="fn-name">Function name <span class="optional">(optional — auto-detected when one function present)</span></label>
+        <input type="text" id="fn-name" placeholder="e.g. bubble_sort">
+      </div>
+      <label class="cb-label">
+        <input type="checkbox" id="skip-ai" checked>
+        Skip AI analysis
+      </label>
+    </div>
+    <div>
+      <button type="submit" id="submit-btn">Analyze &rarr;</button>
+    </div>
+  </form>
+
+  <div id="error-banner" hidden></div>
+  <div id="result-area" hidden></div>
+</main>
+
+<script>
+const BADGE = {
+  'O(1)':       ['#3fb950','#3fb95022','#3fb95055'],
+  'O(log n)':   ['#56d364','#56d36422','#56d36455'],
+  'O(n)':       ['#e3b341','#e3b34122','#e3b34155'],
+  'O(n log n)': ['#f0883e','#f0883e22','#f0883e55'],
+  'O(n\\u00b2)': ['#f85149','#f8514922','#f8514955'],
+  'Unknown':    ['#8b949e','#8b949e22','#8b949e55'],
+};
+
+function renderBadge(label, text) {
+  const [fg, bg, border] = BADGE[text] || BADGE['Unknown'];
+  return `<div class="badge-group">
+    <span class="lbl">${label}</span>
+    <span class="badge" style="color:${fg};background:${bg};border:1px solid ${border}">${text}</span>
+  </div>`;
+}
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Restore key on load
+const keyEl = document.getElementById('key');
+keyEl.value = sessionStorage.getItem('oracle_key') || '';
+
+document.getElementById('toggle-key').addEventListener('click', () => {
+  keyEl.type = keyEl.type === 'password' ? 'text' : 'password';
+});
+
+document.getElementById('form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  const key     = keyEl.value.trim();
+  const code    = document.getElementById('code').value;
+  const fnName  = document.getElementById('fn-name').value.trim();
+  const noAgent = document.getElementById('skip-ai').checked;
+  const btn     = document.getElementById('submit-btn');
+  const errEl   = document.getElementById('error-banner');
+  const resEl   = document.getElementById('result-area');
+
+  if (key) sessionStorage.setItem('oracle_key', key);
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Analyzing…';
+  errEl.hidden = true;
+  resEl.hidden = true;
+
+  const body = { code, no_agent: noAgent };
+  if (fnName) body.function_name = fnName;
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (key) headers['X-Anthropic-API-Key'] = key;
+
+  try {
+    const res  = await fetch('/analyze', { method: 'POST', headers, body: JSON.stringify(body) });
+    const data = await res.json();
+
+    if (!res.ok) {
+      errEl.className = 'error-banner';
+      errEl.textContent = data.detail || `Error ${res.status}`;
+      errEl.hidden = false;
+    } else {
+      resEl.innerHTML = buildResult(data);
+      resEl.hidden = false;
+    }
+  } catch (_) {
+    errEl.className = 'error-banner';
+    errEl.textContent = 'Network error — is the server reachable?';
+    errEl.hidden = false;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Analyze &rarr;';
+  }
+});
+
+function buildResult(d) {
+  const statusHtml = d.mismatch
+    ? `<div class="mismatch-banner">⚠️ Mismatch — ${esc(d.mismatch_reason || 'complexities differ')}</div>`
+    : `<div class="agree-banner">✅ Static and empirical complexities agree</div>`;
+
+  const cloudHtml = d.profiling_disabled
+    ? `<p class="cloud-note">🌐 Cloud mode — empirical profiling is disabled for security. Only static analysis was run.</p>`
+    : '';
+
+  let agentHtml = '';
+  if (d.agent) {
+    const snip = d.agent.code_snippet
+      ? `<pre class="snippet">${esc(d.agent.code_snippet)}</pre>`
+      : '';
+    agentHtml = `
+      <hr class="divider">
+      <div class="section-title">🤖 Agent Analysis</div>
+      <div class="agent-grid">
+        <div class="agent-row"><strong>Verdict</strong>${esc(d.agent.verdict)}</div>
+        <div class="agent-row"><strong>Why</strong>${esc(d.agent.why)}</div>
+        <div class="agent-row"><strong>Fix</strong>${esc(d.agent.fix)}</div>
+        ${snip ? `<div class="agent-row"><strong>Code suggestion</strong>${snip}</div>` : ''}
+      </div>
+      <p class="hint">${d.agent.tokens_used.toLocaleString()} tokens used</p>`;
+  }
+
+  let warningsHtml = '';
+  if (d.warnings && d.warnings.length) {
+    const items = d.warnings.map(w => `<div class="warning-item">⚠ ${esc(w)}</div>`).join('');
+    warningsHtml = `<hr class="divider"><div class="section-title">Warnings</div><div class="warnings">${items}</div>`;
+  }
+
+  return `<div class="result-card">
+    <div class="result-header">
+      <span class="fn-name">${esc(d.function_name)}</span>
+      <div class="badges">
+        ${renderBadge('Static', d.static_complexity)}
+        ${renderBadge('Empirical', d.empirical_complexity)}
+      </div>
+      <span class="r2">R² = ${d.r_squared.toFixed(3)}</span>
+    </div>
+    ${statusHtml}
+    ${cloudHtml}
+    ${agentHtml}
+    ${warningsHtml}
+  </div>`;
+}
+</script>
+</body>
+</html>"""
+
 
 app = FastAPI(
     title="Complexity Oracle API",
@@ -103,6 +342,12 @@ def _resolve_api_key(request: Request) -> str | None:
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def index() -> HTMLResponse:
+    """Serve the browser web UI."""
+    return HTMLResponse(content=_HTML)
+
 
 @app.get("/health", summary="Liveness check")
 def health() -> dict[str, str]:
