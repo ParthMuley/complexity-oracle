@@ -486,6 +486,16 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
                 # Agent failure is non-fatal — surface the reason so the UI can show it
                 agent_error = str(e)
 
+        # In cloud mode, profiling is intentionally disabled — strip the
+        # resulting "Profiling failed" and "Empirical complexity could not be
+        # determined" warnings since the UI already shows the cloud-mode banner.
+        _CLOUD_NOISE = {"Profiling failed", "Empirical complexity could not be determined"}
+        warnings = (
+            [w for w in report.warnings if not any(w.startswith(p) for p in _CLOUD_NOISE)]
+            if cloud_mode
+            else report.warnings
+        )
+
         return AnalyzeResponse(
             function_name=function_name,
             static_complexity=report.parse.static_complexity.value,
@@ -493,7 +503,7 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
             r_squared=report.fit.r_squared,
             mismatch=report.fit.mismatch,
             mismatch_reason=report.fit.mismatch_reason,
-            warnings=report.warnings,
+            warnings=warnings,
             profiling_disabled=cloud_mode,
             agent=agent_out,
             agent_error=agent_error,

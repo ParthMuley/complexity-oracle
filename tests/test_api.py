@@ -464,6 +464,31 @@ class TestCloudMode:
         assert r.json()["agent"] is None
         assert "bad API key" in r.json()["agent_error"]
 
+    def test_cloud_mode_strips_profiling_noise_warnings(self):
+        """Profiling-disabled warnings should not appear in cloud mode responses."""
+        noisy_report = Report(
+            source_file="/tmp/f.py",
+            parse=_parse(),
+            profile=ProfileResult(input_sizes=[], runtimes_ms=[], timed_out=False,
+                                  error="Profiling disabled in cloud mode."),
+            fit=FitResult(empirical_complexity=Complexity.UNKNOWN, r_squared=0.0,
+                          mismatch=False, mismatch_reason=None),
+            warnings=[
+                "Profiling failed: Profiling disabled in cloud mode.",
+                "Empirical complexity could not be determined",
+            ],
+        )
+        with (
+            patch(f"{_PIPELINE}.parse_file", return_value=_parse()),
+            patch(f"{_PIPELINE}.build_report", return_value=noisy_report),
+            patch.dict(os.environ, {"CLOUD_MODE": "true"}),
+        ):
+            r = client.post("/analyze", json={"code": "def f(x): pass", "no_agent": True})
+        assert r.status_code == 200
+        warnings = r.json()["warnings"]
+        assert not any("Profiling failed" in w for w in warnings)
+        assert not any("Empirical complexity could not be determined" in w for w in warnings)
+
     def test_cloud_mode_agent_receives_cloud_mode_flag(self):
         with (
             patch(f"{_PIPELINE}.run_agent", return_value=_agent_result()) as mock_agent,
