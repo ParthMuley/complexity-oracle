@@ -63,6 +63,10 @@ mcp = FastMCP(
     # Disable DNS rebinding protection — this is a developer tool accessed by
     # MCP clients (Claude Code), not a browser-facing service.
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+    # Serve the Streamable HTTP endpoint at "/" within the sub-app so that
+    # when FastAPI mounts it at "/mcp", the full path is simply "/mcp".
+    # (Default would be "/mcp" within the sub-app → "/mcp/mcp" when mounted.)
+    streamable_http_path="/",
 )
 
 
@@ -161,11 +165,21 @@ def fit_curve(
     )
 
 
-# ── ASGI app for SSE transport (mounted by api/app.py at /mcp) ───────────────
+# ── ASGI apps for mounting on FastAPI ────────────────────────────────────────
 
 def get_sse_app():
-    """Return the FastMCP SSE ASGI app for mounting on FastAPI."""
+    """Return the FastMCP SSE ASGI app for mounting on FastAPI (legacy)."""
     return mcp.sse_app()
+
+
+def get_streamable_http_app():
+    """Return the FastMCP Streamable HTTP ASGI app for mounting on FastAPI.
+
+    The FastMCP instance is configured with streamable_http_path="/", so
+    when this app is mounted at "/mcp" on FastAPI, the MCP endpoint is
+    reachable at exactly "/mcp" — the URL Claude Code expects.
+    """
+    return mcp.streamable_http_app()
 
 
 # ── Entry point (stdio transport) ─────────────────────────────────────────────

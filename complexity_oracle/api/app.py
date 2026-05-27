@@ -35,7 +35,7 @@ from slowapi.errors import RateLimitExceeded
 
 from complexity_oracle.api.middleware import RATE_LIMIT, limiter
 from complexity_oracle.core.agent import run_agent
-from complexity_oracle.mcp.server import get_sse_app
+from complexity_oracle.mcp.server import get_streamable_http_app
 from complexity_oracle.core.fitter import fit_curve
 from complexity_oracle.core.parser import parse_file
 from complexity_oracle.core.profiler import profile_file
@@ -320,8 +320,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# MCP SSE transport — mount at /mcp so Claude Code can connect remotely
-app.mount("/mcp", get_sse_app())
+# MCP Streamable HTTP transport — mount at /mcp so Claude Code can connect remotely.
+# FastMCP is configured with streamable_http_path="/" so the endpoint sits at /mcp
+# (not /mcp/mcp). Claude Code config: {"type": "http", "url": ".../mcp"}
+app.mount("/mcp", get_streamable_http_app())
 
 
 # ── Request / Response models ─────────────────────────────────────────────────
