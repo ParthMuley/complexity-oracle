@@ -63,6 +63,10 @@ mcp = FastMCP(
     # Disable DNS rebinding protection — this is a developer tool accessed by
     # MCP clients (Claude Code), not a browser-facing service.
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+    # Stateless mode: each request is handled independently with no session
+    # resumption. Correct for Claude Code tool calls and avoids the
+    # session-negotiation overhead on Cloud Run.
+    stateless_http=True,
 )
 
 

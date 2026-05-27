@@ -346,6 +346,20 @@ app.add_middleware(
 app.mount("/mcp", _mcp_asgi_app)
 
 
+# ── OAuth protected-resource metadata (MCP SDK auth discovery) ───────────────
+# The TypeScript MCP SDK (used by Claude Code) proactively fetches this endpoint
+# before sending any MCP messages.  Without it FastAPI returns {"detail":"Not Found"}
+# which the SDK tries to parse as an OAuth error response → ZodError.
+# Returning RFC 9449 metadata with an empty authorization_servers list tells the
+# client "this resource exists, no OAuth required" and lets it proceed.
+@app.get("/.well-known/oauth-protected-resource", include_in_schema=False)
+def oauth_protected_resource_metadata() -> dict:
+    return {
+        "resource": "https://complexity-oracle-1049073599817.us-central1.run.app/mcp",
+        "authorization_servers": [],
+    }
+
+
 # ── Request / Response models ─────────────────────────────────────────────────
 
 class AnalyzeRequest(BaseModel):
