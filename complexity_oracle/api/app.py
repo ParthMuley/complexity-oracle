@@ -27,6 +27,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from slowapi import _rate_limit_exceeded_handler
@@ -120,6 +121,11 @@ pre.snippet{background:var(--bg);border-radius:6px;padding:.75rem;font-size:.8re
 <main>
   <form id="form" class="card">
     <div>
+      <label for="server-url">Server URL</label>
+      <input type="text" id="server-url" style="margin-top:.4rem;font-family:monospace;font-size:.8rem" spellcheck="false">
+      <p class="hint" style="margin-top:.4rem">Where to send <code>POST /analyze</code>. Defaults to the live Cloud Run instance.</p>
+    </div>
+    <div>
       <label for="key">Anthropic API Key</label>
       <div class="key-wrap">
         <input type="password" id="key" placeholder="sk-ant-api03-…" autocomplete="off" spellcheck="false">
@@ -174,7 +180,12 @@ function esc(s) {
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// Restore key on load
+const CLOUD_RUN = 'https://complexity-oracle-1049073599817.us-central1.run.app';
+
+// Restore server URL + key from sessionStorage on load
+const serverEl = document.getElementById('server-url');
+serverEl.value = sessionStorage.getItem('oracle_server') || CLOUD_RUN;
+
 const keyEl = document.getElementById('key');
 keyEl.value = sessionStorage.getItem('oracle_key') || '';
 
@@ -185,6 +196,7 @@ document.getElementById('toggle-key').addEventListener('click', () => {
 document.getElementById('form').addEventListener('submit', async (e) => {
   e.preventDefault();
 
+  const server  = (serverEl.value.trim() || CLOUD_RUN).replace(/[/]$/, '');
   const key     = keyEl.value.trim();
   const code    = document.getElementById('code').value;
   const fnName  = document.getElementById('fn-name').value.trim();
@@ -193,6 +205,7 @@ document.getElementById('form').addEventListener('submit', async (e) => {
   const errEl   = document.getElementById('error-banner');
   const resEl   = document.getElementById('result-area');
 
+  sessionStorage.setItem('oracle_server', server);
   if (key) sessionStorage.setItem('oracle_key', key);
 
   // Warn if AI was requested but no key is available
@@ -215,7 +228,7 @@ document.getElementById('form').addEventListener('submit', async (e) => {
   if (key) headers['X-Anthropic-API-Key'] = key;
 
   try {
-    const res  = await fetch('/analyze', { method: 'POST', headers, body: JSON.stringify(body) });
+    const res  = await fetch(`${server}/analyze`, { method: 'POST', headers, body: JSON.stringify(body) });
     const data = await res.json();
 
     if (!res.ok) {
@@ -308,6 +321,14 @@ app = FastAPI(
 # Attach rate limiter
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS — allows the local dev UI (any origin) to POST to this API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
 
 
 # ── Request / Response models ─────────────────────────────────────────────────
