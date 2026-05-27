@@ -121,11 +121,6 @@ pre.snippet{background:var(--bg);border-radius:6px;padding:.75rem;font-size:.8re
 <main>
   <form id="form" class="card">
     <div>
-      <label for="server-url">Server URL</label>
-      <input type="text" id="server-url" style="margin-top:.4rem;font-family:monospace;font-size:.8rem" spellcheck="false">
-      <p class="hint" style="margin-top:.4rem">Where to send <code>POST /analyze</code>. Defaults to the live Cloud Run instance.</p>
-    </div>
-    <div>
       <label for="key">Anthropic API Key</label>
       <div class="key-wrap">
         <input type="password" id="key" placeholder="sk-ant-api03-…" autocomplete="off" spellcheck="false">
@@ -180,11 +175,7 @@ function esc(s) {
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-const CLOUD_RUN = 'https://complexity-oracle-1049073599817.us-central1.run.app';
-
-// Restore server URL + key from sessionStorage on load
-const serverEl = document.getElementById('server-url');
-serverEl.value = sessionStorage.getItem('oracle_server') || CLOUD_RUN;
+const API_BASE = '%%API_BASE%%';
 
 const keyEl = document.getElementById('key');
 keyEl.value = sessionStorage.getItem('oracle_key') || '';
@@ -196,7 +187,6 @@ document.getElementById('toggle-key').addEventListener('click', () => {
 document.getElementById('form').addEventListener('submit', async (e) => {
   e.preventDefault();
 
-  const server  = (serverEl.value.trim() || CLOUD_RUN).replace(/[/]$/, '');
   const key     = keyEl.value.trim();
   const code    = document.getElementById('code').value;
   const fnName  = document.getElementById('fn-name').value.trim();
@@ -205,7 +195,6 @@ document.getElementById('form').addEventListener('submit', async (e) => {
   const errEl   = document.getElementById('error-banner');
   const resEl   = document.getElementById('result-area');
 
-  sessionStorage.setItem('oracle_server', server);
   if (key) sessionStorage.setItem('oracle_key', key);
 
   // Warn if AI was requested but no key is available
@@ -228,7 +217,7 @@ document.getElementById('form').addEventListener('submit', async (e) => {
   if (key) headers['X-Anthropic-API-Key'] = key;
 
   try {
-    const res  = await fetch(`${server}/analyze`, { method: 'POST', headers, body: JSON.stringify(body) });
+    const res  = await fetch(`${API_BASE}/analyze`, { method: 'POST', headers, body: JSON.stringify(body) });
     const data = await res.json();
 
     if (!res.ok) {
@@ -383,10 +372,21 @@ def _resolve_api_key(request: Request) -> str | None:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+_CLOUD_RUN_URL = "https://complexity-oracle-1049073599817.us-central1.run.app"
+
+
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 def index() -> HTMLResponse:
-    """Serve the browser web UI."""
-    return HTMLResponse(content=_HTML)
+    """Serve the browser web UI.
+
+    The JS ``API_BASE`` variable is injected server-side from the
+    ``API_BASE_URL`` env var (defaults to the Cloud Run URL).  Set
+    ``API_BASE_URL=http://localhost:8000`` to point the local UI at the
+    local backend instead.
+    """
+    api_base = os.environ.get("API_BASE_URL", _CLOUD_RUN_URL).rstrip("/")
+    html = _HTML.replace("%%API_BASE%%", api_base)
+    return HTMLResponse(content=html)
 
 
 @app.get("/health", summary="Liveness check")
