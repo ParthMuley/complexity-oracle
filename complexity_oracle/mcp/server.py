@@ -178,6 +178,10 @@ def get_streamable_http_app():
     The FastMCP instance is configured with streamable_http_path="/", so
     when this app is mounted at "/mcp" on FastAPI, the MCP endpoint is
     reachable at exactly "/mcp" — the URL Claude Code expects.
+
+    IMPORTANT: call this once at module level in app.py to trigger lazy
+    initialization of the session manager, then wire mcp.session_manager.run()
+    into FastAPI's lifespan — FastAPI does NOT propagate sub-app lifespans.
     """
     return mcp.streamable_http_app()
 

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -35,7 +36,7 @@ from slowapi.errors import RateLimitExceeded
 
 from complexity_oracle.api.middleware import RATE_LIMIT, limiter
 from complexity_oracle.core.agent import run_agent
-from complexity_oracle.mcp.server import get_streamable_http_app
+from complexity_oracle.mcp.server import get_streamable_http_app, mcp
 from complexity_oracle.core.fitter import fit_curve
 from complexity_oracle.core.parser import parse_file
 from complexity_oracle.core.profiler import profile_file
@@ -44,6 +45,19 @@ from complexity_oracle.models.analysis import Complexity, FitResult, ProfileResu
 
 load_dotenv()
 load_dotenv(Path.home() / ".complexity_oracle" / ".env")
+
+# ── MCP Streamable HTTP setup ─────────────────────────────────────────────────
+# Call once at import time to trigger lazy session manager init, then wire its
+# run() into the FastAPI lifespan — FastAPI does NOT propagate sub-app lifespans.
+_mcp_asgi_app = get_streamable_http_app()
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Run the MCP session manager alongside the FastAPI app."""
+    async with mcp.session_manager.run():
+        yield
+
 
 # ── Browser UI (inline — no template files needed) ────────────────────────────
 
@@ -306,6 +320,7 @@ app = FastAPI(
         "`X-Anthropic-API-Key` header, or configure a server-side key."
     ),
     version="0.1.0",
+    lifespan=_lifespan,
 )
 
 # Attach rate limiter
@@ -321,9 +336,9 @@ app.add_middleware(
 )
 
 # MCP Streamable HTTP transport — mount at /mcp so Claude Code can connect remotely.
-# FastMCP is configured with streamable_http_path="/" so the endpoint sits at /mcp
-# (not /mcp/mcp). Claude Code config: {"type": "http", "url": ".../mcp"}
-app.mount("/mcp", get_streamable_http_app())
+# _mcp_asgi_app is built at import time (triggers session manager lazy init).
+# The session manager is started in _lifespan above.
+app.mount("/mcp", _mcp_asgi_app)
 
 
 # ── Request / Response models ─────────────────────────────────────────────────
