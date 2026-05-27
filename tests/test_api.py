@@ -450,6 +450,20 @@ class TestCloudMode:
             client.post("/analyze", json={"code": "def f(x): pass", "no_agent": True})
         mock_fit.assert_not_called()
 
+    def test_agent_error_surfaced_when_agent_raises(self):
+        with (
+            patch(f"{_PIPELINE}.parse_file", return_value=_parse()),
+            patch(f"{_PIPELINE}.profile_file", return_value=_profile()),
+            patch(f"{_PIPELINE}.fit_curve", return_value=_fit()),
+            patch(f"{_PIPELINE}.build_report", return_value=_report()),
+            patch(f"{_PIPELINE}.run_agent", side_effect=RuntimeError("bad API key")),
+            patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-ant-bad"}),
+        ):
+            r = client.post("/analyze", json={"code": "def f(x): pass", "no_agent": False})
+        assert r.status_code == 200
+        assert r.json()["agent"] is None
+        assert "bad API key" in r.json()["agent_error"]
+
     def test_cloud_mode_agent_receives_cloud_mode_flag(self):
         with (
             patch(f"{_PIPELINE}.run_agent", return_value=_agent_result()) as mock_agent,

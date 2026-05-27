@@ -195,6 +195,14 @@ document.getElementById('form').addEventListener('submit', async (e) => {
 
   if (key) sessionStorage.setItem('oracle_key', key);
 
+  // Warn if AI was requested but no key is available
+  if (!noAgent && !key) {
+    errEl.className = 'error-banner';
+    errEl.textContent = 'Paste your Anthropic API key above before enabling AI analysis.';
+    errEl.hidden = false;
+    return;
+  }
+
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span>Analyzing…';
   errEl.hidden = true;
@@ -252,6 +260,13 @@ function buildResult(d) {
         ${snip ? `<div class="agent-row"><strong>Code suggestion</strong>${snip}</div>` : ''}
       </div>
       <p class="hint">${d.agent.tokens_used.toLocaleString()} tokens used</p>`;
+  } else if (d.agent_error) {
+    agentHtml = `
+      <hr class="divider">
+      <div class="section-title">🤖 Agent Analysis</div>
+      <div class="mismatch-banner" style="background:rgba(227,179,65,.1);border-color:rgba(227,179,65,.4);color:var(--yellow)">
+        ⚠ Agent failed — ${esc(d.agent_error)}
+      </div>`;
   }
 
   let warningsHtml = '';
@@ -328,6 +343,10 @@ class AnalyzeResponse(BaseModel):
         description="True when running in CLOUD_MODE — profiling is skipped for security.",
     )
     agent: AgentOutput | None
+    agent_error: str | None = Field(
+        None,
+        description="Set when the agent was requested but failed — analysis is still returned.",
+    )
 
 
 # ── Key resolution ────────────────────────────────────────────────────────────
@@ -427,6 +446,7 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
 
         # ── Agent (optional) ───────────────────────────────────────────────────
         agent_out: AgentOutput | None = None
+        agent_error: str | None = None
         if not body.no_agent:
             api_key = _resolve_api_key(request)
             if not api_key:
@@ -453,8 +473,8 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
                     tokens_used=agent_result.tokens_used,
                 )
             except Exception as e:
-                # Agent failure is non-fatal — return analysis without explanation
-                pass
+                # Agent failure is non-fatal — surface the reason so the UI can show it
+                agent_error = str(e)
 
         return AnalyzeResponse(
             function_name=function_name,
@@ -466,6 +486,7 @@ async def analyze(request: Request, body: AnalyzeRequest) -> AnalyzeResponse:
             warnings=report.warnings,
             profiling_disabled=cloud_mode,
             agent=agent_out,
+            agent_error=agent_error,
         )
 
     finally:
