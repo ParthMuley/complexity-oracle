@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -35,7 +36,7 @@ from slowapi.errors import RateLimitExceeded
 
 from complexity_oracle.api.middleware import RATE_LIMIT, limiter
 from complexity_oracle.core.agent import run_agent
-from complexity_oracle.mcp.server import get_sse_app
+from complexity_oracle.mcp.server import get_streamable_http_app, mcp
 from complexity_oracle.core.fitter import fit_curve
 from complexity_oracle.core.parser import parse_file
 from complexity_oracle.core.profiler import profile_file
@@ -44,6 +45,23 @@ from complexity_oracle.models.analysis import Complexity, FitResult, ProfileResu
 
 load_dotenv()
 load_dotenv(Path.home() / ".complexity_oracle" / ".env")
+
+# ── MCP Streamable HTTP setup ─────────────────────────────────────────────────
+# Build the ASGI app once at import time — this triggers lazy init of
+# mcp._session_manager so we can access mcp.session_manager below.
+_mcp_asgi_app = get_streamable_http_app()
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Run the MCP session manager alongside the FastAPI app.
+
+    FastAPI does NOT propagate lifespan events to mounted sub-apps, so we
+    must start the session manager here in the top-level lifespan instead.
+    """
+    async with mcp.session_manager.run():
+        yield
+
 
 # ── Browser UI (inline — no template files needed) ────────────────────────────
 
@@ -306,6 +324,7 @@ app = FastAPI(
         "`X-Anthropic-API-Key` header, or configure a server-side key."
     ),
     version="0.1.0",
+    lifespan=_lifespan,
 )
 
 # Attach rate limiter
@@ -320,8 +339,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# MCP SSE transport — mount at /mcp so Claude Code can connect remotely
-app.mount("/mcp", get_sse_app())
+# MCP Streamable HTTP transport — mount at /mcp so Claude Code can connect remotely.
+# _mcp_asgi_app is built at import time (triggers session manager lazy init).
+# The session manager is started in _lifespan above — FastAPI does not propagate
+# sub-app lifespans, so we must run it manually there.
+app.mount("/mcp", _mcp_asgi_app)
 
 
 # ── Request / Response models ─────────────────────────────────────────────────

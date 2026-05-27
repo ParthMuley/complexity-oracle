@@ -161,11 +161,31 @@ def fit_curve(
     )
 
 
-# ── ASGI app for SSE transport (mounted by api/app.py at /mcp) ───────────────
+# ── ASGI apps for transport (mounted by api/app.py at /mcp) ─────────────────
 
 def get_sse_app():
     """Return the FastMCP SSE ASGI app for mounting on FastAPI."""
     return mcp.sse_app()
+
+
+def get_streamable_http_app():
+    """Return the FastMCP Streamable HTTP ASGI app for mounting on FastAPI.
+
+    Calling this initialises mcp._session_manager (lazy init).  The caller
+    MUST wire mcp.session_manager.run() into FastAPI's lifespan — FastAPI does
+    not propagate sub-app lifespans.  Example (api/app.py):
+
+        _mcp_asgi_app = get_streamable_http_app()   # init session manager
+
+        @asynccontextmanager
+        async def _lifespan(app):
+            async with mcp.session_manager.run():
+                yield
+
+        app = FastAPI(lifespan=_lifespan)
+        app.mount("/mcp", _mcp_asgi_app)
+    """
+    return mcp.streamable_http_app()
 
 
 # ── Entry point (stdio transport) ─────────────────────────────────────────────
