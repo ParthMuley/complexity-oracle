@@ -67,6 +67,10 @@ mcp = FastMCP(
     # resumption. Correct for Claude Code tool calls and avoids the
     # session-negotiation overhead on Cloud Run.
     stateless_http=True,
+    # FastMCP defaults streamable_http_path to "/mcp".  We mount the sub-app
+    # at "/mcp" in FastAPI, which strips that prefix before forwarding, so the
+    # sub-app receives "/" — it must handle "/" not "/mcp" or 404s result.
+    streamable_http_path="/",
 )
 
 
